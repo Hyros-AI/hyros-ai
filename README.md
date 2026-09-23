@@ -16,7 +16,7 @@ The UI is the HYROS product-window system (cream ground, white windows, mono
 labels, serif figures, one purple accent; Sep 2026).
 **Before ANY visual change, read [`UI-STYLE-GUIDE.md`](./UI-STYLE-GUIDE.md).**
 
-This is template version **0.2.1** (`package.json`; also returned by
+This is template version **0.2.2** (`package.json`; also returned by
 `/api/health` and stored in every snapshot as `templateVersion`). Changes
 are listed in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -314,7 +314,7 @@ HYROS Performance Report** (2026-08-13→19, Traffic source, Last Click):
 | Profit | 556,162.19 | `revenue - cost` |
 | Reported vs Revenue | 559,391.77 | `revenue - reported` |
 | ROI | 13,467.77% | `(revenue - cost) / cost * 100` |
-| ROAS | 135.68 | `revenue / cost` |
+| ROAS | 135.68 | `totalRevenue / cost` (one-time + recurring; equal to `revenue` on this account) |
 
 All four match exactly. The suite also covers divide-by-zero behaviour, the
 re-derive-don't-average rollup rule, seed integrity, the incremental lead

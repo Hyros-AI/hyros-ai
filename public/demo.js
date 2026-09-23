@@ -72,14 +72,15 @@ function adMetrics(r, roas, spendShare, days) {
   const sales = Math.max(revenue > 0 ? 1 : 0, Math.round(revenue / aov));
   const leads = Math.round(clicks * jitter(r, 0.045, 0.4));
   const calls = Math.round(leads * 0.12);
+  const recurringRevenue = round2(revenue * 0.18);
   return {
-    cost, revenue, totalRevenue: round2(revenue * jitter(r, 1.08, 0.05)),
+    cost, revenue, totalRevenue: round2(revenue + recurringRevenue),
     sales, leads, newLeads: Math.round(leads * 0.9), calls,
     qualifiedCalls: Math.round(calls * 0.7),
     clicks, impressions, newVisits: Math.round(clicks * 0.78),
     reported: round2(revenue * jitter(r, 0.72, 0.15)),
     uniqueCustomers: Math.round(sales * 0.85),
-    recurringRevenue: round2(revenue * 0.18),
+    recurringRevenue,
     refund: round2(revenue * jitter(r, 0.015, 0.5)),
     refundCount: Math.round(sales * 0.015),
     partialVideoViews: Math.round(impressions * 0.19),

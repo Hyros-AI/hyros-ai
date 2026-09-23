@@ -4,6 +4,22 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-09-23
+
+### Fixed
+- **ROAS omitted recurring revenue.** `derive()` computed ROAS as
+  `revenue / cost`, but HYROS's `REVENUE` covers one-time sales only —
+  rebills land in `RECURRING_REVENUE`, and `TOTAL_REVENUE` and `ROAS`
+  are the ones that count both (api-docs.hyros.com, GET /attribution and
+  /attribution/roas). ROAS is now `totalRevenue / cost` at every level,
+  falling back to `revenue` when a row has no `totalRevenue`. Accounts
+  with subscriptions were under-reporting ROAS; press **Refresh** to
+  rebuild the snapshot. Profit and ROI still use `revenue` (the docs
+  give no definition for them). The self-test now checks the docs'
+  worked example (9,550 / 2,792.40 = 3.42).
+- The Demo account's `totalRevenue` now equals `revenue + recurringRevenue`
+  instead of an unrelated jitter.
+
 ## [0.2.1] — 2026-09-17
 
 ### Fixed

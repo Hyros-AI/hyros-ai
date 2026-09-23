@@ -200,12 +200,15 @@ const RATIOS = {
 export function derive(row) {
   const cost = num(row.cost);
   const revenue = num(row.revenue);
+  // HYROS ROAS counts rebills: revenue is one-time sales only, totalRevenue adds
+  // recurring, so total >= revenue; a missing or zeroed total falls back to revenue.
+  const totalRevenue = Math.max(revenue, num(row.totalRevenue));
   const impressions = num(row.impressions);
 
   const out = {
     ...row,
     profit: revenue - cost,
-    roas: cost === 0 ? null : revenue / cost,
+    roas: cost === 0 ? null : totalRevenue / cost,
     roi: cost === 0 ? null : ((revenue - cost) / cost) * 100,
     reportedVsRevenue: revenue - num(row.reported),
     ctr: impressions === 0 ? null : (num(row.clicks) / impressions) * 100,

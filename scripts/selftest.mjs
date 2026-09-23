@@ -27,6 +27,16 @@ console.log('\nHYROS UI parity — Total row (from the real report screen)');
   check('ROAS               = 135.68', total.roas, 135.68, 0.005);
 }
 
+console.log('\nAPI docs parity — ROAS counts recurring revenue (GET /attribution/roas example)');
+{
+  const row = derive({ cost: 2792.40, revenue: 8200, recurringRevenue: 1350, totalRevenue: 9550 });
+  check('ROAS = total_revenue / cost = 3.42', row.roas, 3.42, 0.005);
+  const legacy = derive({ cost: 100, revenue: 300 });
+  check('ROAS falls back to revenue when totalRevenue is absent', legacy.roas, 3);
+  const zeroed = derive({ cost: 100, revenue: 300, totalRevenue: 0 });
+  check('ROAS falls back to revenue when totalRevenue is zeroed', zeroed.roas, 3);
+}
+
 console.log('\nHYROS UI parity — "meta" row (zero attributed revenue)');
 {
   const meta = derive({ cost: 4129.58, revenue: 0, reported: 0, clicks: 2378, impressions: 0 });
