@@ -1236,6 +1236,7 @@ function note(msg, isErr) {
  */
 function persistNote(body) {
   if (body?.persisted) return '';
+  if (body?.readOnly === 'preview') return ' Not persisted — preview deployment (read-only).';
   const storage = body?.storeConfigured ?? body?.storage
     ?? (body?.storeVia ? true : undefined)
     ?? state.capabilities?.storeConfigured ?? state.setup?.storage;

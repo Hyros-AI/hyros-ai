@@ -56,9 +56,21 @@ export function storeConfigured() {
   return storeCredentials() !== null;
 }
 
+/**
+ * Vercel preview deployments share the production store when Upstash is
+ * connected to "all environments", so a Refresh, setup or reset on a preview
+ * URL would overwrite live data. Previews read; they never write.
+ */
+export function storeReadOnly() {
+  return process.env.VERCEL_ENV === 'preview' ? 'preview' : null;
+}
+
+const WRITE_COMMANDS = new Set(['SET', 'DEL']);
+
 async function kv(command) {
   const creds = storeCredentials();
   if (!creds) return null;
+  if (storeReadOnly() && WRITE_COMMANDS.has(String(command[0]).toUpperCase())) return null;
   try {
     const res = await fetch(creds.url, {
       method: 'POST',
@@ -106,8 +118,8 @@ export async function wipeAll() {
     if (!Array.isArray(r)) break;
     const [next, keys] = r;
     if (Array.isArray(keys) && keys.length) {
-      await kv(['DEL', ...keys]);
-      deleted += keys.length;
+      const n = await kv(['DEL', ...keys]);
+      if (typeof n === 'number') deleted += n;
     }
     cursor = String(next);
     if (cursor === '0') break;

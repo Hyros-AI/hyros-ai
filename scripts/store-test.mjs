@@ -133,5 +133,80 @@ const ok = (name, cond, extra = '') => check(name, Boolean(cond), true) || (cond
   }
 }
 
+/* Vercel preview deployments share the production store when Upstash is connected to
+ * "all environments": every write (refresh, setup, reset, cron lock) must be refused there. */
+console.log('\nPreview deployments are read-only');
+{
+  const mem = new Map([['aihyros:acct:x:snapshot', JSON.stringify({ generatedAt: '2026-09-23T00:00:00.000Z', origin: 'mcp' })]]);
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (!String(url).startsWith('http://kv.ro')) return orig(url, opts);
+    const [cmd, k, v, ...rest] = JSON.parse(opts.body);
+    if (cmd === 'GET') return new Response(JSON.stringify({ result: mem.get(k) ?? null }));
+    if (cmd === 'SET') { mem.set(k, v); return new Response(JSON.stringify({ result: 'OK' })); }
+    if (cmd === 'DEL') { let n = 0; for (const key of [k, v, ...rest].filter(Boolean)) n += mem.delete(key) ? 1 : 0; return new Response(JSON.stringify({ result: n })); }
+    if (cmd === 'SCAN') return new Response(JSON.stringify({ result: ['0', [...mem.keys()]] }));
+    return new Response(JSON.stringify({ result: null }));
+  };
+  const env = { KV_REST_API_URL: 'http://kv.ro', KV_REST_API_TOKEN: 't' };
+  delete process.env.VERCEL_ENV;
+  await withEnv(env, (m) => check('storeReadOnly() is null outside previews', m.storeReadOnly?.() ?? null, null));
+  process.env.VERCEL_ENV = 'preview';
+  await withEnv(env, async (m) => {
+    check('storeReadOnly() names the preview environment', m.storeReadOnly?.() ?? null, 'preview');
+    const wrote = await m.writeSnapshot({ generatedAt: '2026-09-24T00:00:00.000Z', origin: 'mcp' }, 'x');
+    check('writeSnapshot on a preview answers false', wrote, false);
+    check('…and the production snapshot is untouched', JSON.parse(mem.get('aihyros:acct:x:snapshot')).generatedAt, '2026-09-23T00:00:00.000Z');
+    check('…and no dated history copy is written', [...mem.keys()].some((k) => k.endsWith(':2026-09-24')), false);
+    const read = await m.readSnapshot('x');
+    check('readSnapshot still works on a preview', read?.origin, 'mcp');
+    const wiped = await m.wipeAll();
+    check('wipeAll on a preview deletes nothing', wiped, 0);
+    check('…and the store still has its keys', mem.size, 1);
+    check('kvRaw refuses a SET (the cron lock) on a preview', await m.kvRaw(['SET', 'aihyros:cron:lock', 'now', 'NX', 'EX', '10']), null);
+    const setup = await import('../api/_setup.js');
+    const st = await setup.setupState();
+    check('setupState() reports readOnly = preview', st.readOnly ?? null, 'preview');
+  });
+  delete process.env.VERCEL_ENV;
+  globalThis.fetch = orig;
+}
+
+/* Upstash refuses requests over 10 MB; a snapshot that would exceed it is trimmed to its
+ * newest CRM rows (and says so) instead of silently never being stored again. */
+console.log('\nOversized snapshots are trimmed before storing');
+{
+  const { fitSnapshot } = await import('../api/_snapshot.js');
+  const pad = 'x'.repeat(200);
+  const rows = (prefix, n) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, joined: `2026-09-${String(24 - (i % 20)).padStart(2, '0')}`, hasAttribution: i % 2 === 0, stage: i % 5 === 0 ? 'Customer' : 'Lead', income: 10, qualified: i % 3 === 0, pad }));
+  const make = () => {
+    const leads = rows('l', 400), sales = rows('s', 400), calls = rows('c', 50), subscriptions = rows('u', 10);
+    return {
+      schema: 2, generatedAt: '2026-09-24T00:00:00.000Z', warnings: [],
+      crm: {
+        leads, sales, calls, subscriptions, stages: [], window: { from: 'a', to: 'b' },
+        sync: { incremental: false, leadsFetched: 400, syncedAt: 'now', truncated: { leads: false, sales: false, calls: false, subscriptions: false } },
+        totals: { leads: 400, attributed: 200, customers: 80, income: 4000, calls: 50, qualifiedCalls: 17, subscriptions: 10 },
+      },
+    };
+  };
+  const bytes = (o) => Buffer.byteLength(JSON.stringify(o));
+  const small = make();
+  const fittedSmall = fitSnapshot?.(small, 10 * 1024 * 1024);
+  check('a snapshot under the limit is returned unchanged', Boolean(fittedSmall) && JSON.stringify(fittedSmall) === JSON.stringify(small), true);
+  const big = make();
+  const before = bytes(big);
+  const limit = Math.floor(before / 2);
+  const fitted = fitSnapshot?.(big, limit);
+  check('an oversized snapshot ends up under the limit', Boolean(fitted) && bytes(fitted) <= limit, true);
+  check('the biggest lists were trimmed, the small ones kept', Boolean(fitted) && fitted.crm.leads.length < 400 && fitted.crm.sales.length < 400 && fitted.crm.calls.length === 50 && fitted.crm.subscriptions.length === 10, true);
+  check('the newest rows are the ones kept', fitted?.crm.leads[0]?.id, 'l0');
+  check('trimmed lists are flagged truncated', Boolean(fitted) && fitted.crm.sync.truncated.leads === true && fitted.crm.sync.truncated.sales === true && fitted.crm.sync.truncated.calls === false, true);
+  check('totals are recomputed from the kept rows', Boolean(fitted) && fitted.crm.totals.leads === fitted.crm.leads.length && fitted.crm.totals.calls === 50, true);
+  check('a "truncated" warning names the size cap', Boolean(fitted) && fitted.warnings.some((w) => w.kind === 'truncated' && w.level === 'crm' && /MB/.test(w.error)), true);
+  check('the original snapshot object is not mutated', big.crm.leads.length, 400);
+}
+
+
 console.log(fails ? `\n${fails} FAILURE(S)\n` : '\nAll store + API contract checks pass.\n');
 process.exit(fails ? 1 : 0);

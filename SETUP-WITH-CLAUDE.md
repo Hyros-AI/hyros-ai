@@ -146,7 +146,10 @@ Claude confirms the previous step's "done when" before continuing.
   type any. **It must be Upstash for Redis**: the marketplace also lists a
   product called just "Redis" (Redis Cloud, `REDIS_URL`), which the app
   does not speak. Then **Deployments → latest → ⋯ → Redeploy** (required —
-  functions read variables only at deploy time).
+  functions read variables only at deploy time). Pull-request previews
+  share this store but are read-only (they never overwrite the live
+  snapshot); connect it to Production only if previews must not see live
+  data.
 - **Claude does**: after the redeploy, reads `/api/setup` again and
   expects `"storage":true` and `"state":"needs_setup"`. If it still says
   `needs_storage`, the redeploy was skipped or the store is connected to a

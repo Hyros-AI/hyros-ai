@@ -16,7 +16,7 @@
  * which is client-side and always available.
  */
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
-import { readConfig, writeConfig, storeConfigured, storeCredentials, readAccounts, wipeAll } from './_store.js';
+import { readConfig, writeConfig, storeConfigured, storeCredentials, storeReadOnly, readAccounts, wipeAll } from './_store.js';
 import { mcpUrl } from './_mcp.js';
 
 const fail = (message, status, code) => Object.assign(new Error(message), { status, code });
@@ -86,7 +86,7 @@ export async function setupState() {
   if (storage && password) accounts = (await readAccounts()).filter((a) => a.kind !== 'client').length;
   const state = !storage ? 'needs_storage' : !password ? 'needs_setup' : 'ready';
   return {
-    state, storage, storeVia: storeCredentials()?.via || null,
+    state, storage, storeVia: storeCredentials()?.via || null, readOnly: storeReadOnly(),
     passwordSource: password, masterPassword: masterPassword(),
     keySecret: keySecretSource(cfg), cronSecret: cronSecretSource(cfg),
     // "Hardened" = no generated secret is still sitting in KV.

@@ -4,6 +4,21 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] — 2026-09-24
+
+### Fixed
+- **Preview deployments are read-only.** With Upstash connected to "all
+  environments", a Refresh, setup or factory reset on a pull-request
+  preview URL wrote into the production store. Every write is now refused
+  when `VERCEL_ENV=preview`; `/api/refresh` answers `readOnly: "preview"`
+  with a warning, `/api/setup` reports `readOnly`, and the dashboard says
+  "Not persisted — preview deployment (read-only)".
+- **Oversized snapshots are trimmed instead of silently never stored.**
+  Upstash refuses requests over 10 MB and the snapshot is written in one
+  `SET`. A snapshot over 9 MB now loses its oldest CRM rows (longest list
+  first) until it fits, the trimmed lists are flagged `truncated`, totals
+  are recomputed and a `truncated` warning says what was kept.
+
 ## [0.2.2] — 2026-09-23
 
 ### Fixed

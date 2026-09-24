@@ -16,7 +16,7 @@ The UI is the HYROS product-window system (cream ground, white windows, mono
 labels, serif figures, one purple accent; Sep 2026).
 **Before ANY visual change, read [`UI-STYLE-GUIDE.md`](./UI-STYLE-GUIDE.md).**
 
-This is template version **0.2.2** (`package.json`; also returned by
+This is template version **0.2.3** (`package.json`; also returned by
 `/api/health` and stored in every snapshot as `templateVersion`). Changes
 are listed in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -63,6 +63,10 @@ are listed in [`CHANGELOG.md`](./CHANGELOG.md).
    **It must be Upstash.** The Vercel marketplace also lists a product
    called just "Redis" (Redis Cloud), which injects `REDIS_URL`; the app
    speaks the Upstash REST protocol only and does not work with it.
+   Pull-request **preview deployments are read-only**: they show the live
+   snapshot but Refresh, setup and reset never write to the store from a
+   preview URL. Connect the store to Production only if previews should
+   not see live data at all.
 4. **Connect.** Open the URL (or click *Check again*). One screen: **paste
    your HYROS API key** (HYROS → Settings → API) and **choose the
    dashboard password**. Tick *agency key* to add every client account you
@@ -216,6 +220,10 @@ averaged.
   60 s: change the one line in `vercel.json`
   (`"api/refresh.js": { "maxDuration": 60, … }`) and `REFRESH_MAX_S` to
   60; every share scales down with it.
+- **Snapshot size.** Upstash refuses requests over 10 MB and the snapshot
+  is written in one request, so a snapshot that would exceed 9 MB is
+  trimmed to its newest CRM rows before it is stored; the trimmed lists
+  are flagged `truncated` and a warning says what was kept.
 - **Scale Advisor** covers every ad account plus the six biggest ad sets by
   30-day spend; **Tracking Health** checks the script on up to 5 verified
   domains and lists 50 tracking-parameter rows per integration type.

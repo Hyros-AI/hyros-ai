@@ -9,8 +9,8 @@
  * only trace a template owner has when a user reports "it failed".
  */
 import { checkAccess, isCron, deny } from './_auth.js';
-import { buildSnapshot } from './_snapshot.js';
-import { writeSnapshot, readSnapshot, readPrefs, storeConfigured, kvRaw } from './_store.js';
+import { buildSnapshot, fitSnapshot } from './_snapshot.js';
+import { writeSnapshot, readSnapshot, readPrefs, storeConfigured, storeReadOnly, kvRaw } from './_store.js';
 import { McpNotConfigured } from './_mcp.js';
 import { accountFromReq, asAccount, listAccounts, markKeyStatus, noteRefresh, syncClients } from './_accounts.js';
 import { logEvent } from './_log.js';
@@ -45,6 +45,7 @@ async function refreshAccount(accountId, steps, budgetMs) {
     }
     throw err;
   }
+  snapshot = fitSnapshot(snapshot);
   const persisted = storeConfigured() ? await writeSnapshot(snapshot, accountId) : false;
   if (storeConfigured()) { await markKeyStatus(accountId, 'ok'); await noteRefresh(accountId, true); }
   logEvent('refresh.ok', { accountId, ms: Date.now() - started, warnings: snapshot.warnings?.length || 0, persisted });
@@ -120,9 +121,12 @@ export default async function handler(req, res) {
       account: accountId,
       persisted,
       storeConfigured: storeConfigured(),
-      warning: storeConfigured()
-        ? undefined
-        : 'KV is not configured, so this snapshot was not stored. Set KV_REST_API_URL / KV_REST_API_TOKEN.',
+      readOnly: storeReadOnly(),
+      warning: !storeConfigured()
+        ? 'KV is not configured, so this snapshot was not stored. Set KV_REST_API_URL / KV_REST_API_TOKEN.'
+        : storeReadOnly()
+          ? 'This is a Vercel preview deployment: the snapshot was built but not stored (previews never write to the production store).'
+          : undefined,
       ms: Date.now() - started,
       // Budget vs. spent, so the client can show how much of the 5 minutes
       // a large account really needed (`ms` is kept for older clients).

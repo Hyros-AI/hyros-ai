@@ -406,18 +406,54 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
     stages: stages.map((s) => ({ name: s.name, amount: s.amount })),
     window: { from: leadsFrom, to: leadsTo },
     sync: { incremental, leadsFetched: fetchedLeads.length, syncedAt: now.toISOString(), truncated },
-    totals: {
-      leads: leads.length,
-      attributed: leads.filter((l) => l.hasAttribution).length,
-      customers: leads.filter((l) => l.stage === 'Customer').length,
-      income: leads.reduce((sum, l) => sum + l.income, 0),
-      calls: calls.length,
-      qualifiedCalls: calls.filter((c) => c.qualified).length,
-      subscriptions: subscriptions.length,
-    },
+    totals: crmTotals(leads, calls, subscriptions),
   };
   // `notes` are the truncation reasons for snapshot.warnings (kind 'truncated').
   return { block, notes: truncationErrors };
+}
+
+function crmTotals(leads, calls, subscriptions) {
+  return {
+    leads: leads.length,
+    attributed: leads.filter((l) => l.hasAttribution).length,
+    customers: leads.filter((l) => l.stage === 'Customer').length,
+    income: leads.reduce((sum, l) => sum + l.income, 0),
+    calls: calls.length,
+    qualifiedCalls: calls.filter((c) => c.qualified).length,
+    subscriptions: subscriptions.length,
+  };
+}
+
+/** Upstash refuses any request over 10 MB; the snapshot is written in one SET. */
+export const SNAPSHOT_MAX_BYTES = 9 * 1024 * 1024;
+const CRM_LISTS = ['leads', 'sales', 'calls', 'subscriptions'];
+
+/**
+ * Trim a snapshot that would not fit the store's request limit: the longest
+ * CRM list loses its oldest rows (lists are newest-first) until the JSON fits,
+ * the trimmed lists are flagged `truncated`, totals are recomputed and a
+ * warning says what was kept. Below the limit the snapshot is returned as is.
+ */
+export function fitSnapshot(snapshot, maxBytes = SNAPSHOT_MAX_BYTES) {
+  const size = (o) => Buffer.byteLength(JSON.stringify(o));
+  if (!snapshot?.crm || size(snapshot) <= maxBytes) return snapshot;
+  const crm = { ...snapshot.crm, sync: { ...(snapshot.crm.sync || {}), truncated: { ...(snapshot.crm.sync?.truncated || {}) } } };
+  const out = { ...snapshot, crm, warnings: [...(snapshot.warnings || [])] };
+  const kept = {};
+  for (let guard = 0; guard < 40; guard += 1) {
+    const bytes = size(out);
+    if (bytes <= maxBytes) break;
+    const list = CRM_LISTS.filter((k) => Array.isArray(crm[k]) && crm[k].length).sort((a, b) => crm[b].length - crm[a].length)[0];
+    if (!list) break;
+    const keep = Math.floor(crm[list].length * Math.min(0.9, maxBytes / bytes));
+    crm[list] = crm[list].slice(0, keep);
+    crm.sync.truncated[list] = true;
+    kept[list] = keep;
+  }
+  crm.totals = crmTotals(crm.leads || [], crm.calls || [], crm.subscriptions || []);
+  const summary = Object.entries(kept).map(([k, n]) => `${n} ${k}`).join(', ');
+  out.warnings.push({ adAccountId: null, name: null, type: null, level: 'crm', error: `snapshot over ${Math.round(maxBytes / 1024 / 1024)} MB (the store's request limit): kept the newest ${summary}`, kind: 'truncated' });
+  return out;
 }
 
 /* ---------------- Scale Advisor: marginal CAC curves ---------------- */
