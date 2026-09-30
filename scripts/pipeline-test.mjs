@@ -202,9 +202,13 @@ try {
   mock.adAccounts = [];
   mock.pages('hyros_get_calls', 8, 250);
   calls.length = 0;
-  const snapCalls = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs });
+  // Count only the core's requests: a fork's feature step may pull calls itself.
+  let coreCallsEnd = -1;
+  const snapCalls = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs,
+    onProgress: (s) => { if (coreCallsEnd < 0 && /^feature /.test(s)) coreCallsEnd = calls.length; } });
+  const coreCalls = coreCallsEnd < 0 ? calls : calls.slice(0, coreCallsEnd);
   check('8 pages of calls -> 2,000 calls, truncated.calls === false', snapCalls.crm.calls.length === 2000 && snapCalls.crm.sync.truncated.calls === false && snapCalls.crm.totals.calls === 2000, JSON.stringify([snapCalls.crm.calls.length, snapCalls.crm.sync.truncated]));
-  check('calls paged with the previous nextPageId (8 requests)', calls.filter((c) => c.name === 'hyros_get_calls').length === 8, String(calls.filter((c) => c.name === 'hyros_get_calls').length));
+  check('calls paged with the previous nextPageId (8 requests)', coreCalls.filter((c) => c.name === 'hyros_get_calls').length === 8, String(coreCalls.filter((c) => c.name === 'hyros_get_calls').length));
   mock.latencyMs = { hyros_get_calls: 150 };
   const snapCut = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs, budgetMs: 1200 });
   check('a small budget cuts the pull: truncated.calls === true with the rows fetched so far, a "time budget" note', snapCut.crm.sync.truncated.calls === true && snapCut.crm.calls.length > 0 && snapCut.crm.calls.length < 2000 && snapCut.warnings.some((w) => w.kind === 'truncated' && /calls: showing \d+ rows \(time budget\)/.test(w.error)), JSON.stringify([snapCut.crm.calls.length, snapCut.crm.sync.truncated, snapCut.warnings.filter((w) => /calls/.test(w.error))]));
@@ -255,8 +259,11 @@ try {
   console.log('\nleadStage is validated against the account stages (docs: unknown name -> 400 on every level)');
   calls.length = 0;
   const typoPrefs = { settings: { model: 'LAST_CLICK', windowDays: 0, leadStage: ['Custmer', 'customer', 'Lead'] } };
-  const snapStage = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs: typoPrefs });
-  check('stages fetched once per build, not again inside the CRM', calls.filter((c) => c.name === 'hyros_get_stages').length === 1, String(calls.filter((c) => c.name === 'hyros_get_stages').length));
+  let stageCoreEnd = -1;
+  const snapStage = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs: typoPrefs,
+    onProgress: (s) => { if (stageCoreEnd < 0 && /^feature /.test(s)) stageCoreEnd = calls.length; } });
+  const stageCalls = (stageCoreEnd < 0 ? calls : calls.slice(0, stageCoreEnd)).filter((c) => c.name === 'hyros_get_stages');
+  check('stages fetched once per build, not again inside the CRM', stageCalls.length === 1, String(stageCalls.length));
   const stageReq = calls.find((c) => c.name === 'hyros_get_attribution_report')?.args.request;
   check('typo dropped, case-insensitive match kept with the account spelling', JSON.stringify(stageReq?.leadStage) === '["Customer","Lead"]' && JSON.stringify(snapStage.settings.leadStage) === '["Customer","Lead"]', JSON.stringify([stageReq?.leadStage, snapStage.settings.leadStage]));
   check('the dropped stage is a kind error warning naming it', snapStage.warnings.some((w) => w.kind === 'error' && /Custmer/.test(w.error) && /stage/i.test(w.error)), JSON.stringify(snapStage.warnings.filter((w) => w.kind === 'error')));

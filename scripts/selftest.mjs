@@ -31,10 +31,18 @@ console.log('\nAPI docs parity — ROAS counts recurring revenue (GET /attributi
 {
   const row = derive({ cost: 2792.40, revenue: 8200, recurringRevenue: 1350, totalRevenue: 9550 });
   check('ROAS = total_revenue / cost = 3.42', row.roas, 3.42, 0.005);
+  check('Profit = total_revenue - cost = 6,757.60', row.profit, 6757.60);
+  check('ROI = (total_revenue - cost) / cost', row.roi, (9550 - 2792.40) / 2792.40 * 100, 0.01);
+  check('tiles close: profit = total - cost and roas = total / cost', approx(row.profit + row.cost, row.roas * row.cost), true);
   const legacy = derive({ cost: 100, revenue: 300 });
   check('ROAS falls back to revenue when totalRevenue is absent', legacy.roas, 3);
   const zeroed = derive({ cost: 100, revenue: 300, totalRevenue: 0 });
   check('ROAS falls back to revenue when totalRevenue is zeroed', zeroed.roas, 3);
+  check('the fallback total is written to the row (tile = profit + cost)', legacy.totalRevenue, 300);
+  const lower = derive({ cost: 100, revenue: 300, totalRevenue: 250 });
+  check('a HYROS total lower than revenue is kept, not overridden', lower.roas, 2.5);
+  const mixed = aggregate([derive({ cost: 100, revenue: 300, totalRevenue: 0 }), derive({ cost: 100, revenue: 100, totalRevenue: 500 })]);
+  check('rollup of a missing-total child and a full child: total 800, profit 600', mixed.totalRevenue === 800 && mixed.profit === 600, true);
 }
 
 console.log('\nHYROS UI parity — "meta" row (zero attributed revenue)');

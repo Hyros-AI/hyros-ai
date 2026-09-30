@@ -68,8 +68,10 @@ zero color literals; keep it that way).
 | `--brand` | `#5150F6` | THE accent — what HYROS attributed / changed / selected |
 | `--brand-2` | `#403FD4` | purple hover |
 | `--good` | `#1F8A5B` | positive money / status — data only |
-| `--bad` / `--warn` | `#B5533A` | negative money / status / errors — data only |
+| `--bad` | `#B5533A` | negative money / status / errors — data only |
 | `--bad-fill` | `rgba(217,119,87,.16)` | the terracotta tint behind bad pills and error notes |
+| `--warn` | `#B0781E` | warnings: partial data, no-show / refunded, "needs attention" — never an error |
+| `--warn-fill` | `rgba(176,120,30,.14)` | the amber tint behind warning pills |
 
 Tints are built from these with rgba (purple `rgba(81,80,246,.3)` borders,
 `.16` focus rings; green `rgba(31,138,91,.07)` fills) — never new hex values.
@@ -157,11 +159,11 @@ colourways (lavender here).
   `--rule` dividers; 13px cells; sticky first column; sticky `--surface-2`
   totals row at weight 500. Row hover `--surface-2` (first col
   `--surface-3`). **The HYROS band**: attributed columns (`HY` in app.js:
-  `revenue`, `roas`) render `td.hy` purple on `#F4F4FD` (lavender on hover
+  `totalRevenue`, `revenue`, `roas`) render `td.hy` purple on `#F4F4FD` (lavender on hover
   and in totals), `th.hy` purple — the site's HYROS-column signature.
   No zebra striping. CRM runs one step denser (`#crmTable` 12.5px / `8px 9px`).
 - **Pills** `.pill` — mono 10px, hairline, radius 6, `--surface-2`. Status
-  tints: `.pill.stage`/`.ok` green, `.pill.warn`/`.bad` terracotta,
+  tints: `.pill.stage`/`.ok` green, `.pill.warn` amber, `.pill.bad` terracotta,
   `.pill.fb` lavender/purple. The CRM table and drawer use the SAME tints.
 - **Badges** `.badge` — mono with a status dot: `.live` lavender/purple,
   `.seed` cream2, `.demo` INK with a lavender dot.

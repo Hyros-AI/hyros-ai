@@ -69,7 +69,8 @@
   --good:      #1F8A5B;
   --bad:       #B5533A;
   --bad-fill:  rgba(217,119,87,.16);
-  --warn:      #B5533A;
+  --warn:      #B0781E;
+  --warn-fill: rgba(176,120,30,.14);
 
   /* the console */
   --term:      #1F1E1D;
@@ -170,7 +171,13 @@ button.drill:active, button.name-drill:active, .cohort-row:active { transform: n
 .brand-dot { display: none; }
 .meta { color: var(--ink-2); font-size: 12.5px; display: flex; align-items: center; flex-wrap: wrap; }
 .meta b { color: var(--ink); font-weight: 500; }
-.meta .warn { color: var(--warn, #b45309); cursor: help; }
+.meta .warn { color: var(--warn); }
+.meta .warn summary { cursor: pointer; list-style: none; }
+.meta .warn summary::-webkit-details-marker { display: none; }
+.meta .warn summary::after { content: " ▾"; font-size: 10px; }
+.meta .warn details[open] summary::after { content: " ▴"; }
+.meta .warn ul { margin: 6px 0 0; padding-left: 16px; color: var(--ink-2); font-size: 12px; max-height: 30vh; overflow: auto; }
+.meta:has(.warn details[open]) { align-items: flex-start; }
 .meta > span { display: flex; align-items: center; }
 .meta > span + span::before { content: "·"; margin: 0 10px; color: var(--border-2); }
 /* the ::before dot would land INSIDE the pill's rounded box — space it with margin instead */
@@ -421,9 +428,9 @@ button.drill:hover { color: var(--brand-2); background: none; border: 0; }
   padding: 12px 16px 7px; background: var(--surface);
 }
 
-/* status pills — the only green and terracotta in the system, inside data only */
+/* status pills — the only green, amber and terracotta in the system, inside data only */
 .pill.stage { color: var(--good); border-color: rgba(31,138,91,.3); background: rgba(31,138,91,.07); }
-.pill.warn  { color: var(--bad); border-color: rgba(181,83,58,.3); background: var(--bad-fill); }
+.pill.warn  { color: var(--warn); border-color: rgba(176,120,30,.3); background: var(--warn-fill); }
 .pill.fb    { color: var(--brand); border-color: rgba(81,80,246,.3); background: var(--lavbg); }
 
 /* cohort list */
@@ -629,7 +636,7 @@ button.drill.clip { text-align: left; }
 .acct-row.disabled { cursor: not-allowed; opacity: .7; }
 .acct-row.disabled:hover { background: none; }
 .acct-row .pills { display: flex; gap: 4px; align-items: center; }
-.pill.warnk { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, transparent); background: var(--bad-fill, transparent); }
+.pill.warnk { color: var(--warn); border-color: rgba(176,120,30,.3); background: var(--warn-fill); }
 .acct-fix { border: 1px solid var(--border-2); background: var(--surface); color: var(--ink); font-size: 11px;
   padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .acct-fix:hover { border-color: var(--brand); color: var(--brand); }

@@ -4,6 +4,36 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] — 2026-09-28
+
+Beta feedback from a live account.
+
+### Fixed
+- **Revenue, Profit, ROI and ROAS now agree.** Since 0.2.2 ROAS counted
+  rebills (`TOTAL_REVENUE`) while the Revenue tile, Profit and ROI used
+  one-time `REVENUE`, so Revenue ÷ Cost did not equal the ROAS next to
+  it. Profit and ROI are now over total revenue too, and the highlighted
+  tile is **Total Revenue**. The table still offers both columns.
+  `derive()` now writes the total it used back to the row (a row without
+  `TOTAL_REVENUE` showed a $0 tile next to a positive Profit), and falls
+  back to `REVENUE` only when the total is missing or zero — the 0.2.2
+  `max(revenue, total)` overrode a lower figure reported by HYROS.
+- **Warnings are amber, errors stay terracotta.** `--warn` was the same
+  colour as `--bad`; it is now `#B0781E` with `--warn-fill`, and
+  warning pills (no-show, refunded, …) use it.
+  Account-row pills split the same way: "pending approval" and "MCP: no
+  client access yet" are amber, "key invalid", "access revoked" and
+  "last refresh failed" stay terracotta.
+- **Refresh warnings open on tap.** The header's warning kept its details
+  in a hover tooltip, invisible on touch screens; it is now a disclosure
+  that lists every detail (scrolls past 30% of the screen height).
+- **The pipeline test no longer breaks forks.** The calls-paging and
+  stages-once checks counted every request in the refresh, including a
+  fork's feature steps; they now count the core's requests only.
+- The attribution request's comment claimed report visibility was applied;
+  `hyros_get_attribution_report` has no such parameter, so deleted source
+  links still count on per-ad rows. Raised as a FINDINGS.md §15 ask.
+
 ## [0.2.3] — 2026-09-24
 
 ### Fixed

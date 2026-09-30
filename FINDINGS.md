@@ -299,6 +299,7 @@ a documentation ask.
 | P1 | Total counts (or counts by stage / tag / day) on paged lists | "1,000+" instead of a real total | **in QA** (group-by counts) |
 | P1 | Synchronous `sort` + `limit` on `/attribution` with `isAdAccountId` | Top-N computed from the newest 250 sources | **investigating** |
 | P1 | Document `parentId` on ad rows, the `{ request }` wrapper and enum casing, the two Tracking Health tools, `ceilingBasis`, the `windowAttributionDaysRange` model rule | Code relies on undocumented behaviour | new (docs) |
+| P1 | `reportSourceVisibility` on `hyros_get_attribution_report` (today only the ad-account report has it), and `ALL_SOURCES` + visibility as the default on both report tools | Per-ad rows count deleted source links and can differ from app.hyros.com; the `PRIORITIZE_PAID` default inflated one beta account ~6× in sales and 2× in ROAS | new (beta feedback) |
 | P1 | 429 semantics on MCP tool calls (HTTP 429 vs JSON-RPC error; `retryAfter` in the tool error) | Back-off is best-effort | new |
 | P2 | Honour the `fields` projection on `/attribution` (payloads are ~90% null, ~120 fields per row) or document that it does not trim | Payload size; unverified on the bound account | open |
 | P2 | Explicit error (or `SOURCE_CATEGORY` semantics) for `facebook_campaign` instead of `[]` | Silent empty array reads as missing data | open |

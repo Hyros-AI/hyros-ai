@@ -200,16 +200,18 @@ const RATIOS = {
 export function derive(row) {
   const cost = num(row.cost);
   const revenue = num(row.revenue);
-  // HYROS ROAS counts rebills: revenue is one-time sales only, totalRevenue adds
-  // recurring, so total >= revenue; a missing or zeroed total falls back to revenue.
-  const totalRevenue = Math.max(revenue, num(row.totalRevenue));
+  // Revenue is one-time sales only; totalRevenue adds rebills and is what HYROS's ROAS
+  // counts, so profit/ROI/ROAS all use it. A missing or zeroed total falls back to revenue
+  // and is written back so the Total Revenue tile agrees with them.
+  const totalRevenue = num(row.totalRevenue) === 0 ? revenue : num(row.totalRevenue);
   const impressions = num(row.impressions);
 
   const out = {
     ...row,
-    profit: revenue - cost,
+    totalRevenue,
+    profit: totalRevenue - cost,
     roas: cost === 0 ? null : totalRevenue / cost,
-    roi: cost === 0 ? null : ((revenue - cost) / cost) * 100,
+    roi: cost === 0 ? null : ((totalRevenue - cost) / cost) * 100,
     reportedVsRevenue: revenue - num(row.reported),
     ctr: impressions === 0 ? null : (num(row.clicks) / impressions) * 100,
     cpm: impressions === 0 ? null : (cost / impressions) * 1000,

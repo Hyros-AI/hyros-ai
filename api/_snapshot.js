@@ -164,7 +164,9 @@ async function fetchLevel(level, adAccountId, range, settings, { deadline = null
     // Newest sources first: on accounts with many inactive sources the
     // oldest-first default fills the page with ads that no longer run.
     newestFirst: true,
-    // ALL_SOURCES + report visibility = what the account's own report screens use.
+    // ALL_SOURCES = how the report screens attribute. This tool has no
+    // reportSourceVisibility (only the ad-account report does), so deleted
+    // source links still count here — FINDINGS.md §15.
     sourceConfiguration: 'ALL_SOURCES',
     fields: REPORT_FIELDS,
   };

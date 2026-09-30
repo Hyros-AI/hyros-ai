@@ -21,12 +21,12 @@ const LEVEL_LABEL = Object.fromEntries(LEVELS.map((l) => [l.key, l.label]));
 const CHILD_LEVEL = { traffic: 'campaign', account: 'campaign', campaign: 'adset', adset: 'ad' };
 
 /* HYROS-attributed columns wear the lavender band (the site's HYROS-column signature). Cosmetic only. */
-const HY = new Set(['revenue', 'roas']);
-const KPI_HY = 'revenue';
+const HY = new Set(['totalRevenue', 'revenue', 'roas']);
+const KPI_HY = 'totalRevenue';
 
 const KPIS = [
   { key: 'cost',    label: 'Cost',    type: 'money' },
-  { key: 'revenue', label: 'Revenue', type: 'money' },
+  { key: 'totalRevenue', label: 'Total Revenue', type: 'money' },
   { key: 'profit',  label: 'Profit',  type: 'money', tone: true },
   { key: 'roas',    label: 'ROAS',    type: 'ratio' },
   { key: 'sales',   label: 'Sales',   type: 'int' },
@@ -636,8 +636,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
  * One line, grouped by kind: "2 ad accounts skipped: A, B · 1 rate limited: C
- * · sources list truncated · 1 range not fetched". Every detail goes in the
- * title so the line itself stays short. Empty string when nothing is wrong.
+ * · sources list truncated · 1 range not fetched". Details open on tap (no
+ * hover-only tooltip) so they are readable on touch. Empty string when nothing is wrong.
  */
 function buildWarningsLine(s) {
   const warnings = Array.isArray(s?.warnings) ? s.warnings : [];
@@ -663,7 +663,7 @@ function buildWarningsLine(s) {
     details.push(...skippedRanges.map((r) => `${r.label}: not fetched this refresh (${r.skipped}) — press Refresh again.`));
   }
   if (!parts.length) return '';
-  return `<span class="warn" title="${esc(details.join('\n'))}">${esc(parts.join(' · '))}</span>`;
+  return `<span class="warn"><details><summary>${esc(parts.join(' · '))}</summary><ul>${details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></details></span>`;
 }
 
 /* ---------- report settings (attribution model / window / stage ranking) ---------- */
@@ -759,9 +759,9 @@ async function loadAccounts() {
 function acctBlock(a) {
   // Approval state first (it is what the user must fix in HYROS), then key health.
   if (a.kind === 'client' && a.status === 'PENDING') return { text: 'pending approval', why: 'HYROS has not approved the agency\u2019s access to this client yet.' };
-  if (a.kind === 'client' && a.status === 'REVOKED') return { text: 'access revoked', why: 'This client no longer appears in the agency\u2019s accessible accounts.' };
-  if (a.kind === 'client' && a.status !== 'APPROVED') return { text: String(a.status || '').toLowerCase(), why: 'Not approved.' };
-  if (a.keyStatus === 'invalid') return { text: 'key invalid', why: a.keyError || 'HYROS rejected this key.', fix: a.kind === 'client' ? null : a.id };
+  if (a.kind === 'client' && a.status === 'REVOKED') return { error: true, text: 'access revoked', why: 'This client no longer appears in the agency\u2019s accessible accounts.' };
+  if (a.kind === 'client' && a.status !== 'APPROVED') return { error: true, text: String(a.status || '').toLowerCase(), why: 'Not approved.' };
+  if (a.keyStatus === 'invalid') return { error: true, text: 'key invalid', why: a.keyError || 'HYROS rejected this key.', fix: a.kind === 'client' ? null : a.id };
   return null;
 }
 
@@ -777,9 +777,9 @@ function acctRowHtml(a, parent) {
   const pills = [
     a.primary ? '<span class="pill">primary</span>' : '',
     a.agency ? '<span class="pill">agency</span>' : '',
-    block ? `<span class="pill warnk" title="${esc(block.why)}">${esc(block.text)}</span>` : '',
+    block ? `<span class="pill ${block.error ? 'bad' : 'warnk'}" title="${esc(block.why)}">${esc(block.text)}</span>` : '',
     unsupported ? '<span class="pill warnk" title="The HYROS MCP does not honor accessible_account_id yet — clients cannot be read through the agency key. Listed so they light up the moment the API supports it.">MCP: no client access yet</span>' : '',
-    a.lastError && !block ? `<span class="pill warnk" title="${esc(a.lastError)}">last refresh failed</span>` : '',
+    a.lastError && !block ? `<span class="pill bad" title="${esc(a.lastError)}">last refresh failed</span>` : '',
     block?.fix ? `<button type="button" class="acct-fix" data-fix="${esc(block.fix)}">Replace key</button>` : '',
   ].join('');
   return `<button type="button" class="acct-row ${a.kind === 'client' ? 'client' : ''} ${!state.demo && a.id === state.account ? 'active' : ''} ${disabled ? 'disabled' : ''}"
