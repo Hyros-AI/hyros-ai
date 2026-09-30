@@ -2,13 +2,13 @@
   "id": "health",
   "name": "Tracking Health",
   "tab": "Tracking Health",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Is the HYROS script on your domains and do your Google ad links carry the parameters attribution needs — checked by HYROS itself.",
   "mode": "both",
   "demo": true,
   "server": true,
   "style": true,
   "needs": [],
-  "tools": ["hyros_get_domains", "hyros_assert_script_presence_on_domain", "hyros_check_tracking_parameters_for_integrations"],
+  "tools": ["hyros_get_domains", "hyros_assert_script_presence_on_domain", "hyros_check_tracking_parameters_for_integrations", "hyros_get_lead_clicks"],
   "author": "HYROS"
 }

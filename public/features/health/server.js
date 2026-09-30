@@ -27,6 +27,13 @@ const MAX_DOMAINS = 20;
 const MAX_URLS_PER_CALL = 3;   // the MCP rejects more per inspection
 const MAX_SITE_URLS = 12;      // 4 batches at most; time budget usually stops earlier
 const MAX_PARAM_ROWS = 50;
+// The script check reads the raw page, so a script a site builder injects at
+// runtime reads "not found" on pages HYROS is tracking. Recent leads' clicks
+// are the proof a site is tracked: up to 50 leads (the tool's limit), 7 days.
+const MAX_CLICK_LEADS = 50;
+const VISIT_DAYS = 7;
+const MAX_CLICK_PAGES = 4;
+const SCRIPT_FOUND_RE = /^(SCRIPT_FOUND|FOUND|OK|PRESENT|INSTALLED)$/i;
 const GOOGLE_CHANNELS = ['SEARCH', 'PERFORMANCE_MAX'];
 const MARKERS = ['skipped', 'error', 'stale'];
 const COMPLETED = new Set(['ok', 'empty']);
@@ -209,6 +216,49 @@ async function checkScript(ctx, domains, domainsCheck) {
   return { scripts, sites, check: base };
 }
 
+/** Hostname without www, lowercased; null for anything that is not a URL. */
+export function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return null; }
+}
+
+/**
+ * Only when a URL came back without the script: the hosts HYROS recorded
+ * visits on in the last VISIT_DAYS days, from the newest leads' clicks. A
+ * failure here is a failed visits check, never a failed step.
+ */
+async function checkVisits(ctx, scripts, now) {
+  const misses = Object.values(scripts || {}).filter((st) => !SCRIPT_FOUND_RE.test(String(st)));
+  if (!misses.length) return { visitedHosts: [], check: skipped('every checked URL has the script') };
+  // A full CRM pull keeps HYROS's order, so sort by latest activity here.
+  const activity = (l) => String(l?.lastSourceDate || l?.joined || '');
+  const leadIds = [...(ctx.snapshot?.crm?.leads || [])].filter((l) => l?.id)
+    .sort((a, b) => activity(b).localeCompare(activity(a)))
+    .map((l) => String(l.id)).slice(0, MAX_CLICK_LEADS);
+  if (!leadIds.length) return { visitedHosts: [], check: skipped('no recent leads to read visits from') };
+  if (ctx.timeLeft() < MIN_CALL_BUDGET_MS) return { visitedHosts: [], check: skipped('time budget') };
+  const fromDate = new Date(now.getTime() - VISIT_DAYS * 86400000).toISOString().slice(0, 10);
+  ctx.log('health visits');
+  const hosts = new Set();
+  let pageId = null;
+  let ms = 0;
+  for (let page = 0; page < MAX_CLICK_PAGES; page += 1) {
+    if (page && ctx.timeLeft() < MIN_CALL_BUDGET_MS) break;
+    const request = { leadIds, fromDate, pageSize: 250, ...(pageId ? { pageId } : {}) };
+    const r = await timed(ctx.callTool, 'hyros_get_lead_clicks', { request }, defaultTimeout(ctx));
+    ms += r.ms || 0;
+    if (r.error) {
+      if (!page) return { visitedHosts: [], check: failed(r.error.message, ms) };
+      break;
+    }
+    const rows = Array.isArray(r.value) ? r.value : (Array.isArray(r.value?.result) ? r.value.result : []);
+    for (const c of rows) { const h = hostOf(c?.page || c?.url || c?.pageUrl); if (h) hosts.add(h); }
+    pageId = r.value?.nextPageId || null;
+    if (!pageId) break;
+  }
+  const visitedHosts = [...hosts].sort();
+  return { visitedHosts, check: visitedHosts.length ? ok(ms) : empty(ms) };
+}
+
 /**
  * The script check is the expensive one, so when it could not run this
  * refresh the panel still shows the last known per-URL results: the
@@ -237,18 +287,20 @@ export async function build(ctx) {
   const params = await checkParams(ctx, hasGoogle);
   const script = await checkScript(ctx, dom.domains, dom.check);
   const carried = COMPLETED.has(script.check.status) ? null : carryScripts(ctx.previous, script.check);
+  const visits = await checkVisits(ctx, carried ? carried.scripts : script.scripts, now);
 
   return {
     checkedAt: now.toISOString(),
     domains: dom.domains,
     sites: (carried ? carried.sites : script.sites) || [],
     scripts: carried ? carried.scripts : script.scripts,
+    visitedHosts: visits.visitedHosts,
     trackingParams: params.trackingParams,
     errors: [
       ...(dom.check.status === 'failed' ? [`domains: ${dom.check.reason}`] : []),
       ...params.errors,
       ...(script.check.status === 'failed' ? [`script: ${script.check.reason}`] : []),
     ],
-    checks: { domains: dom.check, params: params.check, script: carried ? carried.check : script.check },
+    checks: { domains: dom.check, params: params.check, script: carried ? carried.check : script.check, visits: visits.check },
   };
 }

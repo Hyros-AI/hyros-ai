@@ -22,6 +22,7 @@ export function demo() {
       'https://www.scale-ecom.com/': 'SCRIPT_FOUND',
       'https://www.scale-ecom.co.uk/': 'SCRIPT_NOT_FOUND',
     },
+    visitedHosts: [],
     trackingParams: [{
       type: 'SEARCH',
       rows: [
@@ -35,6 +36,7 @@ export function demo() {
       domains: { status: 'ok', ms: 412 },
       params: { status: 'ok', ms: 1730, channels: { SEARCH: 'ok', PERFORMANCE_MAX: 'ok' } },
       script: { status: 'ok', ms: 21880 },
+      visits: { status: 'empty', ms: 640 },
     },
   };
 }

@@ -16,7 +16,7 @@ The UI is the HYROS product-window system (cream ground, white windows, mono
 labels, serif figures, one purple accent; Sep 2026).
 **Before ANY visual change, read [`UI-STYLE-GUIDE.md`](./UI-STYLE-GUIDE.md).**
 
-This is template version **0.2.4** (`package.json`; also returned by
+This is template version **0.2.5** (`package.json`; also returned by
 `/api/health` and stored in every snapshot as `templateVersion`). Changes
 are listed in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -134,11 +134,16 @@ subscriptions, stage and attribution filters, search, CSV export.
 
 **Scale Advisor** — marginal CAC curves per account and top ad set
 (`hyros_get_marginal_cac_curve`), with the saturation point called out.
-The tool currently answers HTTP 404 on the live MCP (raised with HYROS);
-the tab says so instead of showing an empty chart.
+The tool answered HTTP 404 until late September 2026 and now answers on
+live accounts (beta feedback, 2026-09-30); if HYROS does not answer, the
+tab says so instead of showing an empty chart. Account-level curves have
+no ceiling unless `HYROS_CAC_CEILING` is set.
 
 **Tracking Health** — domains, script presence per URL, Google tracking
-parameters per integration.
+parameters per integration. The script check reads the raw page, so a
+site where HYROS recorded visits in the last 7 days (recent leads' clicks)
+counts as tracked even when the check says "not found"; a timeout reads
+"couldn't check".
 
 **Accounts** — any number of HYROS accounts in one dashboard, switched from
 the top-left menu. An agency key adds every approved client account (5 per

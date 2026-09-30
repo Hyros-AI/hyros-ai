@@ -8,7 +8,7 @@ const SCRIPT_OK = new Set(['SCRIPT_FOUND', 'FOUND', 'OK', 'PRESENT', 'INSTALLED'
 // snapshot.warnings[].kind -> pill text. Skips are quiet, failures are bad.
 const WARN_LABEL = { unsupported: 'skipped: unsupported', 'time budget': 'skipped: time budget', rate_limited: 'rate limited', truncated: 'truncated', error: 'error' };
 const WARN_BAD = new Set(['rate_limited', 'error']);
-const CHECK_NAME = { domains: 'verified domains', script: 'script presence', params: 'tracking params' };
+const CHECK_NAME = { domains: 'verified domains', script: 'script presence', params: 'tracking params', visits: 'recent visits' };
 const STATUS_PILL = { ok: 'ok', empty: '', skipped: 'warn', failed: 'bad' };
 const SKIP_LINE = {
   'time budget': 'Skipped this refresh (time budget) — press Refresh again.',
@@ -82,10 +82,13 @@ function checksPanel(checks, h, fmt, esc) {
     domains: checks.domains.status === 'ok' ? `${fmt.int((h.domains || []).length)} verified` : '',
     script: checks.script.status === 'ok' ? `${fmt.int(Object.keys(h.scripts || {}).length)} URLs fetched` : '',
     params: checks.params.status === 'ok' || checks.params.status === 'empty' ? channelsSub(checks.params, '') : '',
+    visits: checks.visits?.status === 'ok' ? `visits on ${fmt.int((h.visitedHosts || []).length)} hosts in 7 days` : '',
   };
+  // A visits check skipped because nothing needed confirming is not worth amber.
+  const pillOf = (id, c) => (id === 'visits' && c.status === 'skipped' ? '' : STATUS_PILL[c.status] || '');
   return `<div class="fpanel"><h3>Checks this refresh</h3>
     <div class="fhint">what each HYROS check did — a skip is not an error, a failure is</div>
-    ${Object.entries(checks).map(([id, c]) => `<div class="health-row"><span class="pill ${STATUS_PILL[c.status] || ''}">${esc(c.status)}</span><code>${esc(CHECK_NAME[id] || id)}</code>
+    ${Object.entries(checks).map(([id, c]) => `<div class="health-row"><span class="pill ${pillOf(id, c)}">${esc(c.status)}</span><code>${esc(CHECK_NAME[id] || id)}</code>
       <span class="health-msg">${esc(c.status === 'ok' || c.status === 'empty' ? detail[id] || (c.status === 'empty' ? 'ran, nothing found' : '') : (c.reason || ''))}</span>
       ${Number.isFinite(c.ms) ? `<span class="sub">${esc(`${(c.ms / 1000).toFixed(1)} s`)}</span>` : ''}</div>`).join('')}
   </div>`;
@@ -100,8 +103,16 @@ function errorsPanel(errors, esc) {
   </div>`;
 }
 
-/** One entry per tracking domain: its site variants with their status; found when any variant has the script. */
-function groupSites(sites, scripts) {
+const isTimeoutStatus = (st) => /TIMEOUT/i.test(String(st));
+
+/**
+ * One entry per tracking domain: its site variants with their status; found
+ * when any variant has the script, visited when it has not but HYROS recorded
+ * visits on the site (the check reads the raw page and misses injected
+ * scripts), timedOut when every checked variant timed out — not "checked".
+ */
+function groupSites(sites, scripts, visitedHosts = []) {
+  const visitedSet = new Set(visitedHosts);
   const byDomain = new Map();
   for (const s of sites) {
     const list = byDomain.get(s.trackingDomain) || [];
@@ -111,12 +122,19 @@ function groupSites(sites, scripts) {
     const checkedVariants = variants.filter((v) => v.status !== null);
     const foundOn = checkedVariants.filter((v) => SCRIPT_OK.has(String(v.status).toUpperCase())).map((v) => v.url);
     const site = (variants[0]?.url || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
-    return { trackingDomain, site, variants, checked: checkedVariants.length > 0, found: foundOn.length > 0, foundOn };
+    const found = foundOn.length > 0;
+    const timedOut = checkedVariants.length > 0 && checkedVariants.every((v) => isTimeoutStatus(v.status));
+    const checked = checkedVariants.some((v) => !isTimeoutStatus(v.status));
+    const host = site.toLowerCase();
+    const visited = !found && checked && [...visitedSet].some((v) => v === host || v.endsWith(`.${host}`));
+    return { trackingDomain, site, variants, checked, timedOut, found, visited, foundOn };
   });
 }
 
 function siteRow(g, checks, stale, fmt, esc) {
-  const pill = !g.checked ? '<span class="pill">not checked</span>'
+  const pill = g.timedOut ? '<span class="pill warn">couldn&#39;t check (timeout)</span>'
+    : !g.checked ? '<span class="pill">not checked</span>'
+    : g.visited ? '<span class="pill warn">not detected · visits tracked</span>'
     : g.found ? `<span class="pill ok">script found${g.foundOn.some((u) => /\/\/www\./.test(u)) && !g.foundOn.some((u) => !/\/\/www\./.test(u)) ? ' (on www)' : ''}</span>`
     : '<span class="pill bad">script not found</span>';
   const variants = g.variants.map((v) => `<span class="sub">${esc(v.url)} · ${esc(v.status === null ? 'not checked' : String(v.status).toLowerCase().replace(/_/g, ' '))}</span>`).join('');
@@ -138,9 +156,18 @@ export function render(ctx) {
   // Group the checked URLs by site (one tracking domain = one site): the
   // script counts as present when ANY variant (apex or www) carries it,
   // because the MCP does not follow the apex -> www redirect most sites use.
-  const siteGroups = groupSites(h.sites || [], h.scripts || {});
+  const siteGroups = groupSites(h.sites || [], h.scripts || {}, h.visitedHosts || []);
   const sitesChecked = siteGroups.filter((g) => g.checked).length;
-  const sitesOk = siteGroups.filter((g) => g.found).length;
+  const sitesOk = siteGroups.filter((g) => g.found || g.visited).length;
+  const sitesMissing = siteGroups.filter((g) => g.checked && !g.found && !g.visited).length;
+  const sitesUnsure = siteGroups.filter((g) => g.visited || (g.timedOut && !g.checked)).length;
+  const sitesTimedOut = siteGroups.filter((g) => g.timedOut && !g.checked).length;
+  const plural = (n, w) => `${fmt.int(n)} ${w}${n === 1 ? '' : 's'}`;
+  const sitesValue = sitesChecked ? `${sitesOk} / ${sitesChecked}` : '—';
+  const sitesCls = sitesMissing ? 'bad' : (!sitesChecked || sitesUnsure ? '' : 'good');
+  const sitesSub = sitesChecked
+    ? `of ${plural(sitesChecked, 'site')} checked (${fmt.int(Object.keys(h.scripts || {}).length)} URLs)${sitesTimedOut ? ` · ${plural(sitesTimedOut, 'site')} couldn't be checked` : ''}`
+    : `${plural(sitesTimedOut, 'site')} couldn't be checked (timeout)`;
   const useSites = siteGroups.length > 0;
   const paramRows = (h.trackingParams || []).flatMap((p) => (p.rows || []).map((r) => ({ ...r, _type: p.type })));
   const flagged = paramRows.filter((r) => r && (r.valid === false || r.missing || r.ok === false || /missing|invalid/i.test(JSON.stringify(r))));
@@ -167,9 +194,9 @@ export function render(ctx) {
       ${ctx.demo ? ' <span class="pill warn">demo</span>' : ''}</div>
     <div class="kpis">${kpis([
       { label: 'Verified domains', value: notRun ? '—' : fmt.int((h.domains || []).length), sub: notRun ? 'not checked' : (checks.domains.status === 'failed' ? `failed: ${shortReason(checks.domains.reason)}` : '') },
-      { label: 'Script present', value: checks.script.status === 'ok' && scripts.length ? (useSites ? `${sitesOk} / ${sitesChecked}` : `${okCount} / ${scripts.length}`) : '—',
-        cls: checks.script.status === 'ok' && scripts.length ? ((useSites ? sitesOk < sitesChecked : okCount < scripts.length) ? 'bad' : 'good') : '',
-        sub: checks.script.status === 'ok' && scripts.length ? (useSites ? `of ${fmt.int(sitesChecked)} site${sitesChecked === 1 ? '' : 's'} checked (${fmt.int(scripts.length)} URLs)` : `of ${fmt.int(scripts.length)} URLs checked`) : checkSub(checks.script, { notRun, emptyText: 'no result' }) },
+      { label: 'Script present', value: checks.script.status === 'ok' && scripts.length ? (useSites ? sitesValue : `${okCount} / ${scripts.length}`) : '—',
+        cls: checks.script.status === 'ok' && scripts.length ? (useSites ? sitesCls : (okCount < scripts.length ? 'bad' : 'good')) : '',
+        sub: checks.script.status === 'ok' && scripts.length ? (useSites ? sitesSub : `of ${fmt.int(scripts.length)} URLs checked`) : checkSub(checks.script, { notRun, emptyText: 'no result' }) },
       { label: 'Ads missing tracking params', value: checks.params.status === 'ok' && paramRows.length ? fmt.int(flagged.length) : '—',
         cls: checks.params.status === 'ok' && paramRows.length ? (flagged.length ? 'bad' : 'good') : '',
         sub: checks.params.status === 'ok' && paramRows.length ? channelsSub(checks.params, (h.trackingParams || []).map((p) => p.type).join(', '))
@@ -179,7 +206,7 @@ export function render(ctx) {
     ${notRun ? '' : errors.length ? `<div class="fcols">${checksPanel(checks, h, fmt, esc)}${errorsPanel(errors, esc)}</div>` : checksPanel(checks, h, fmt, esc)}
     <div class="fcols">
       <div class="fpanel"><h3>Script presence</h3>
-        <div class="fhint">the universal script, fetched and inspected on the site behind each verified tracking domain (apex and www, up to 3 URLs — the MCP's limit)</div>
+        <div class="fhint">the universal script, fetched and inspected on the site behind each verified tracking domain (apex and www, 3 URLs per call — the MCP's limit). The check reads the raw page, so a script your site builder injects can read "not found": a site where HYROS recorded visits in the last 7 days counts as tracked</div>
         ${scriptStale || (checks.script.status !== 'ok' && !notRun && statusLine(checks.script)) ? statusRow(checks.script, esc, `${statusLine(checks.script) || ''}${scriptStale ? ` Showing the previous check${checks.script.checkedAt ? ` from ${fmt.datetime(checks.script.checkedAt)}` : ''}.` : ''}`) : ''}
         ${scripts.length ? (useSites ? siteGroups.map((g) => siteRow(g, checks, scriptStale, fmt, esc)).join('') : scripts.map(([url, st]) => {
           const ok = SCRIPT_OK.has(String(st).toUpperCase());

@@ -445,5 +445,103 @@ console.log('\nManifest rule: live tabs need a server step');
   check('mode demo without server is valid', validateManifest({ ...base, mode: 'demo', demo: true, server: false }, 'xx').length === 0);
 }
 
+console.log('\nHealth: "not found" is cross-checked against tracked visits');
+{
+  const leads = [{ id: 'L1', email: 'a@x.test' }, { id: 'L2', email: 'b@x.test' }, { email: 'no-id@x.test' }];
+  const snapWithLeads = { ...snap, crm: { ...(snap.crm || {}), leads } };
+  const replyWith = (clicks) => async (name, args) => {
+    if (name === 'hyros_get_domains') return ['data.a.test', 'data.b.test'];
+    if (name === 'hyros_assert_script_presence_on_domain') return Object.fromEntries(args.request.domains.map((d) => [d, /b\.test/.test(d) ? 'SCRIPT_NOT_FOUND' : 'SCRIPT_FOUND']));
+    if (name === 'hyros_get_lead_clicks') return clicks(args);
+    return { result: [] };
+  };
+  const vctx = serverCtx({ snapshot: snapWithLeads, reply: replyWith(() => ({ result: [{ page: 'https://www.b.test/landing?x=1' }, { page: 'https://other.test/' }], nextPageId: null })) });
+  const blk = await buildHealth(vctx);
+  const clickCall = vctx.calls.find((c) => c.name === 'hyros_get_lead_clicks');
+  check('a "not found" site triggers one hyros_get_lead_clicks call for the recent leads\' ids', Boolean(clickCall) && JSON.stringify(clickCall.args.request.leadIds) === '["L1","L2"]' && /^\d{4}-\d{2}-\d{2}$/.test(clickCall.args.request.fromDate || ''), JSON.stringify(clickCall?.args));
+  check('visited hosts are recorded without www, deduplicated', JSON.stringify(blk.visitedHosts) === '["b.test","other.test"]', JSON.stringify(blk.visitedHosts));
+  check('checks.visits is ok', blk.checks?.visits?.status === 'ok', JSON.stringify(blk.checks?.visits));
+
+  const allFound = serverCtx({ snapshot: snapWithLeads, reply: async (name, args) => (name === 'hyros_get_domains' ? ['data.a.test'] : name === 'hyros_assert_script_presence_on_domain' ? Object.fromEntries(args.request.domains.map((d) => [d, 'SCRIPT_FOUND'])) : { result: [] }) });
+  const af = await buildHealth(allFound);
+  check('every site found: no lead-clicks call, visits skipped', !allFound.calls.some((c) => c.name === 'hyros_get_lead_clicks') && af.checks?.visits?.status === 'skipped', JSON.stringify(af.checks?.visits));
+
+  const noLeads = serverCtx({ snapshot: { ...snap, crm: { leads: [] } }, reply: replyWith(() => ({ result: [] })) });
+  const nl = await buildHealth(noLeads);
+  check('no recent leads: visits skipped, no call', !noLeads.calls.some((c) => c.name === 'hyros_get_lead_clicks') && /no recent leads/.test(nl.checks?.visits?.reason || ''), JSON.stringify(nl.checks?.visits));
+
+  const boom = serverCtx({ snapshot: snapWithLeads, reply: replyWith(() => { throw new Error('clicks down'); }) });
+  const bm = await buildHealth(boom);
+  check('a failing clicks call is a failed visits check, never a failed refresh', bm.checks?.visits?.status === 'failed' && Array.isArray(bm.visitedHosts) && bm.visitedHosts.length === 0, JSON.stringify(bm.checks?.visits));
+
+  const OKc = { status: 'ok', ms: 1 };
+  const block = {
+    checkedAt: '2026-09-30T12:00:00Z', domains: ['data.a.test', 'data.b.test', 'data.c.test'],
+    sites: [
+      { url: 'https://a.test/', trackingDomain: 'data.a.test' }, { url: 'https://www.a.test/', trackingDomain: 'data.a.test' },
+      { url: 'https://b.test/', trackingDomain: 'data.b.test' }, { url: 'https://www.b.test/', trackingDomain: 'data.b.test' },
+      { url: 'https://c.test/', trackingDomain: 'data.c.test' }, { url: 'https://www.c.test/', trackingDomain: 'data.c.test' },
+    ],
+    scripts: { 'https://a.test/': 'SCRIPT_FOUND', 'https://www.a.test/': 'SCRIPT_FOUND', 'https://b.test/': 'SCRIPT_NOT_FOUND', 'https://www.b.test/': 'SCRIPT_NOT_FOUND', 'https://c.test/': 'TIMEOUT_ERROR', 'https://www.c.test/': 'TIMEOUT_ERROR' },
+    visitedHosts: ['b.test'], trackingParams: [], errors: [],
+    checks: { domains: OKc, script: OKc, params: { status: 'skipped', reason: 'no Google ad accounts connected' }, visits: OKc },
+  };
+  const c = viewCtx('health', block);
+  const err = renders(renderHealth, c);
+  const html = c.root.innerHTML;
+  check('view: renders', !err, err?.message);
+  check('view: "not found" but visits tracked is an amber pill, not an error', /class="pill warn">not detected · visits tracked</.test(html), html.slice(0, 200));
+  check('view: a timeout is amber "couldn\'t check", not "not found"', /class="pill warn">couldn&#39;t check \(timeout\)</.test(html) || /class="pill warn">couldn't check \(timeout\)</.test(html), html.slice(0, 200));
+  check('view: no red "script not found" pill when every miss is explained', !/class="pill bad">script not found</.test(html));
+  const tileScript = c.seen.find((k) => k.label === 'Script present') || {};
+  check('view: "Script present" counts visited sites as working and leaves timeouts out (2 / 2)', tileScript.value === '2 / 2', JSON.stringify(tileScript));
+}
+
+
+console.log('\nHealth: visits cross-check edge cases (QA)');
+{
+  const OKc = { status: 'ok', ms: 1 };
+  const siteBlock = (scripts, visitedHosts, extraChecks = {}) => ({
+    checkedAt: '2026-09-30T12:00:00Z', domains: ['data.a.test', 'data.b.test'],
+    sites: [
+      { url: 'https://a.test/', trackingDomain: 'data.a.test' }, { url: 'https://www.a.test/', trackingDomain: 'data.a.test' },
+      { url: 'https://b.test/', trackingDomain: 'data.b.test' }, { url: 'https://www.b.test/', trackingDomain: 'data.b.test' },
+    ],
+    scripts, visitedHosts, trackingParams: [], errors: [],
+    checks: { domains: OKc, script: OKc, params: { status: 'skipped', reason: 'no Google ad accounts connected' }, visits: OKc, ...extraChecks },
+  });
+  const tileOf = (block) => { const c = viewCtx('health', block); renders(renderHealth, c); return { tile: c.seen.find((k) => k.label === 'Script present') || {}, html: c.root.innerHTML }; };
+
+  const allTimeout = tileOf(siteBlock({ 'https://a.test/': 'TIMEOUT_ERROR', 'https://www.a.test/': 'TIMEOUT_ERROR', 'https://b.test/': 'TIMEOUT_ERROR', 'https://www.b.test/': 'TIMEOUT_ERROR' }, []));
+  check('every site timed out: tile is "—", never a green 0 / 0', allTimeout.tile.value === '—' && allTimeout.tile.cls !== 'good', JSON.stringify(allTimeout.tile));
+  check('...and its sub says the sites could not be checked', /couldn.t be checked/.test(allTimeout.tile.sub || ''), JSON.stringify(allTimeout.tile));
+
+  const visitedOnly = tileOf(siteBlock({ 'https://a.test/': 'SCRIPT_FOUND', 'https://www.a.test/': 'SCRIPT_FOUND', 'https://b.test/': 'SCRIPT_NOT_FOUND', 'https://www.b.test/': 'SCRIPT_NOT_FOUND' }, ['b.test']));
+  check('a visited-only site keeps the tile neutral, not green', visitedOnly.tile.value === '2 / 2' && visitedOnly.tile.cls === '', JSON.stringify(visitedOnly.tile));
+
+  const sub = tileOf(siteBlock({ 'https://a.test/': 'SCRIPT_FOUND', 'https://www.a.test/': 'SCRIPT_FOUND', 'https://b.test/': 'SCRIPT_NOT_FOUND', 'https://www.b.test/': 'SCRIPT_NOT_FOUND' }, ['shop.b.test']));
+  check('visits on a subdomain (shop.b.test) count for the site b.test', /class="pill warn">not detected · visits tracked</.test(sub.html), sub.html.slice(0, 120));
+  const notSub = tileOf(siteBlock({ 'https://a.test/': 'SCRIPT_FOUND', 'https://www.a.test/': 'SCRIPT_FOUND', 'https://b.test/': 'SCRIPT_NOT_FOUND', 'https://www.b.test/': 'SCRIPT_NOT_FOUND' }, ['notb.test']));
+  check('...but a different domain ending in the same letters (notb.test) does not', /class="pill bad">script not found</.test(notSub.html));
+
+  check('checks panel names the visits check', /recent visits/.test(visitedOnly.html));
+  const quiet = tileOf(siteBlock({ 'https://a.test/': 'SCRIPT_FOUND', 'https://www.a.test/': 'SCRIPT_FOUND', 'https://b.test/': 'SCRIPT_FOUND', 'https://www.b.test/': 'SCRIPT_FOUND' }, [], { visits: { status: 'skipped', reason: 'every checked URL has the script' } }));
+  check('visits skipped because every URL has the script is a neutral pill, not amber', !/class="pill warn">skipped<\/span><code>recent visits/.test(quiet.html) && /class="pill ">skipped<\/span><code>recent visits/.test(quiet.html), quiet.html.match(/<span class="pill[^"]*">skipped<\/span><code>recent visits/)?.[0]);
+
+  const leads = [{ id: 'old', joined: '2026-09-01' }, { id: 'mid', joined: '2026-09-10' }, { id: 'new', joined: '2026-09-02', lastSourceDate: '2026-09-29' }];
+  const pages = [];
+  const pctx = serverCtx({ snapshot: { ...snap, crm: { leads } }, reply: async (name, args) => {
+    if (name === 'hyros_get_domains') return ['data.b.test'];
+    if (name === 'hyros_assert_script_presence_on_domain') return Object.fromEntries(args.request.domains.map((d) => [d, 'SCRIPT_NOT_FOUND']));
+    if (name === 'hyros_get_lead_clicks') { pages.push(args.request.pageId || null); return args.request.pageId === 'p2' ? { result: [{ page: 'https://b.test/x' }], nextPageId: null } : { result: [{ page: 'https://x.test/' }], nextPageId: 'p2' }; }
+    return { result: [] };
+  } });
+  const pb = await buildHealth(pctx);
+  const first = pctx.calls.find((c) => c.name === 'hyros_get_lead_clicks');
+  check('leads are read newest activity first (last source date, else joined)', JSON.stringify(first?.args.request.leadIds) === '["new","mid","old"]', JSON.stringify(first?.args.request.leadIds));
+  check('clicks are paged with nextPageId', JSON.stringify(pages) === '[null,"p2"]' && JSON.stringify(pb.visitedHosts) === '["b.test","x.test"]', JSON.stringify([pages, pb.visitedHosts]));
+}
+
+
 console.log(failures ? `\n${failures} feature unit test(s) FAILED` : '\nAll feature unit tests passed.');
 process.exit(failures ? 1 : 0);

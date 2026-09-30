@@ -82,17 +82,38 @@ fresh (new `checkedAt`, no block-level `stale`). The panel shows the last
 known per-URL state with a "previous check · <date>" pill, under the
 status line saying why this refresh did not replace it.
 
+### Visits cross-check (after the script check)
+The script check reads the raw page, so a script injected at runtime by a
+site builder reads `SCRIPT_NOT_FOUND` on pages HYROS is tracking, and slow
+sites answer `TIMEOUT_ERROR` (beta account, 2026-09-28). When any URL came
+back without the script, `hyros_get_lead_clicks { request: { leadIds, fromDate,
+pageSize: 250 } }` reads the clicks of the 50 CRM leads with the latest
+activity (last source date, else join date) over the last 7 days, up to 4
+pages; their page hosts (without `www`) are stored as `visitedHosts`, and
+a visit on a subdomain (`shop.example.com`) counts for its site. The
+view shows a site without the script but with visits as amber "not detected ·
+visits tracked" and counts it as working; a site whose every variant timed
+out is amber "couldn't check (timeout)" and is left out of the count; the
+"Script present" tile is green only when every checked site has the script,
+neutral when a site is only confirmed by visits or could not be checked
+(`—` when no site could be checked), terracotta when one has neither. Only a
+site with no script and no visits is terracotta "script not found". Skipped
+when every URL has the script or there are no leads; a failure is recorded
+in `checks.visits`, never in `errors`.
+
 ## Block shape (`snapshot.health`)
 ```json
 { "checkedAt": "ISO",
   "domains": ["example.com"],
   "scripts": { "https://example.com/": "SCRIPT_FOUND" },
+  "visitedHosts": ["example.com"],
   "trackingParams": [{ "type": "SEARCH", "rows": [{ "adName": "", "valid": true, "missing": ["gclid"] }] }],
   "errors": ["script: HYROS did not answer within 45s (the check fetches every domain live)"],
   "checks": {
     "domains": { "status": "ok", "ms": 412 },
     "params":  { "status": "ok", "ms": 1730, "channels": { "SEARCH": "ok", "PERFORMANCE_MAX": "skipped" } },
-    "script":  { "status": "failed", "reason": "…", "ms": 45001, "stale": true, "checkedAt": "ISO of the results shown" }
+    "script":  { "status": "failed", "reason": "…", "ms": 45001, "stale": true, "checkedAt": "ISO of the results shown" },
+    "visits":  { "status": "ok", "ms": 640 }
   },
   "stale": "optional true", "skipped": "optional" }
 ```

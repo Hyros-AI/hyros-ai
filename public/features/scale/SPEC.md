@@ -33,10 +33,10 @@ the CAC ceiling (the saturation point).
   these first and older spellings (`dailySpend`, `averageCac`, `customers`,
   `saturationPoint.dailySpend`) as fallbacks, and unwraps a REST
   `{ result }` envelope.
-- **Known limitation (Sep 2026):** on some accounts the tool answers HTTP
-  404. Every curve then carries `error`, and the view shows one card
-  ("HYROS did not answer the CAC curve tool … ask HYROS support") instead
-  of per-entity "not enough data".
+- **If HYROS does not answer** (the tool returned HTTP 404 until late
+  September 2026), every curve carries `error` and the view shows one
+  card ("HYROS did not answer the CAC curve tool … ask HYROS support")
+  instead of per-entity "not enough data".
 
 ## Block shape (`snapshot.scale`)
 ```json
@@ -82,10 +82,13 @@ undocumented and mirrors the other report tools (see FINDINGS.md
 "Undocumented behaviour the app relies on").
 
 ## Open limitations
-- The tool returns **HTTP 404 on the live MCP (checked 2026-09-15)** for
-  both `account` and `campaign` levels; until HYROS enables it for the
-  account, every curve carries `error` and the view shows one error card
-  ("HYROS did not answer the CAC curve tool … ask HYROS support").
+- The tool returned **HTTP 404 on the live MCP on 2026-09-15**; a beta
+  account reported it answering for every ad account on 2026-09-30. The
+  error card stays for accounts where it still fails.
+- A curve with very little spend history (e.g. 19 days, 3 spend levels,
+  the lower two with no customers) came back without `INSUFFICIENT_DATA`,
+  so the view shows its numbers without a warning. The view renders every
+  `notes` value HYROS sends; the threshold is HYROS's (FINDINGS.md §15).
 - `cacCeiling` is optional with no default: without `HYROS_CAC_CEILING`
   the account-level curves have no ceiling and therefore no saturation
   point (documented behaviour, not a bug).

@@ -4,6 +4,34 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] — 2026-09-30
+
+Beta feedback from a live account (checkpoint of 2026-09-30).
+
+### Fixed
+- **Tracking Health no longer calls a tracked site "script not found".**
+  `hyros_assert_script_presence_on_domain` reads the raw page, so a script
+  a site builder injects reads `SCRIPT_NOT_FOUND` on pages HYROS is
+  tracking, and some sites answer `TIMEOUT_ERROR`. When any URL comes back
+  without the script, the step now reads the clicks of the 50 leads with
+  the latest activity over the last 7 days (`hyros_get_lead_clicks`, added
+  to the manifest, up to 4 pages) and stores their hosts as `visitedHosts`;
+  a visit on a subdomain counts for its site. A site without the script but with
+  visits is amber "not detected · visits tracked" and counts as working; a
+  site whose every URL timed out is amber "couldn't check (timeout)" and is
+  left out of the count; only a site with neither is terracotta. The
+  "Script present" tile is green only when every checked site has the
+  script, and reads "—" (not a green "0 / 0") when no site could be checked. The feature
+  is version 1.2.0; a failed visits read is recorded in `checks.visits`,
+  never as a check error.
+
+### Changed
+- README, Scale Advisor SPEC and FINDINGS no longer say the CAC curve tool
+  answers HTTP 404: a beta account reports it answering since late
+  September. FINDINGS §15 gains four asks from the same account (rendered
+  script check, previous-period comparison, thin-curve flag, encoded source
+  names).
+
 ## [0.2.4] — 2026-09-28
 
 Beta feedback from a live account.

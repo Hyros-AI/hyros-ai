@@ -234,7 +234,7 @@ in UPPERCASE (section 14).
   unknown name is a `400` listing the valid names. The app validates the
   saved setting against `hyros_get_stages`.
 
-## 13. Marginal CAC curve: documented shape, but HTTP 404 today
+## 13. Marginal CAC curve: documented shape (404 until late September)
 
 `hyros_get_marginal_cac_curve` (`GET /attribution/marginal-cac-curve`):
 `{ id, level: ad|source_link|campaign|account, startDate?, endDate?,
@@ -250,10 +250,14 @@ ordered by spend, `saturationPoint: { efficientSpendPerDay,
 saturatedSpendPerDay, reason } | null`, `notes: []` (`NO_SPEND_DATA`,
 `NO_CUSTOMERS`, `INSUFFICIENT_DATA`, `LTV_CEILING_UNAVAILABLE`).
 
-**Verified live 2026-09-15: the tool returns HTTP 404** for both `account`
-and `campaign` levels. Scale Advisor parses the documented shape (with
-fallbacks) and shows the 404 as an explicit error state instead of an
-empty chart. Ask in section 15.
+**Verified live 2026-09-15: the tool returned HTTP 404** for both `account`
+and `campaign` levels. A beta account reported it answering for every ad
+account on 2026-09-30. Scale Advisor parses the documented shape (with
+fallbacks) and still shows a failure as an explicit error state instead
+of an empty chart. At account level there is no LTV, so without a caller
+`cacCeiling` there is no ceiling and no saturation point; a thin curve
+(3 spend levels, two with no customers) came back without
+`INSUFFICIENT_DATA`. Asks in section 15.
 
 ## 14. Undocumented behaviour the app relies on
 
@@ -293,14 +297,18 @@ a documentation ask.
 | P | Ask | Symptom in the dashboard | Status |
 |---|---|---|---|
 | P0 | Confirm in writing and document `API-Key` auth on `/mcp`, or provide a non-interactive OAuth / service-token path | Template-wide outage risk; users reading the docs are told no key exists | flagged |
-| P0 | Why does `hyros_get_marginal_cac_curve` return HTTP 404? Is it deployed? | Scale Advisor shows an error card | flagged |
+| P0 | Why does `hyros_get_marginal_cac_curve` return HTTP 404? Is it deployed? | Scale Advisor shows an error card | **answering since late Sep** (beta report 2026-09-30) |
 | P0 | Structured error codes: MCP not enabled for the account / invalid key / client not authorized | Raw text on the setup screen | new |
 | P1 | `updatedFromDate` / `updatedToDate` on sales, calls and subscriptions | Full re-pull every refresh; CRM cap | **in QA** |
 | P1 | Total counts (or counts by stage / tag / day) on paged lists | "1,000+" instead of a real total | **in QA** (group-by counts) |
 | P1 | Synchronous `sort` + `limit` on `/attribution` with `isAdAccountId` | Top-N computed from the newest 250 sources | **investigating** |
 | P1 | Document `parentId` on ad rows, the `{ request }` wrapper and enum casing, the two Tracking Health tools, `ceilingBasis`, the `windowAttributionDaysRange` model rule | Code relies on undocumented behaviour | new (docs) |
 | P1 | `reportSourceVisibility` on `hyros_get_attribution_report` (today only the ad-account report has it), and `ALL_SOURCES` + visibility as the default on both report tools | Per-ad rows count deleted source links and can differ from app.hyros.com; the `PRIORITIZE_PAID` default inflated one beta account ~6× in sales and 2× in ROAS | new (beta feedback) |
+| P1 | `hyros_assert_script_presence_on_domain` should inspect the rendered page (scripts injected by site builders read `SCRIPT_NOT_FOUND`), follow redirects, and answer within the call timeout (`TIMEOUT_ERROR` on some sites) | Tracking Health cross-checks with `hyros_get_lead_clicks` to avoid false "not found" | new (beta feedback) |
+| P1 | `hyros_generate_public_report` `options.comparison { enabled: true, compareBy: DATES }` returns the current period only; `B_*` fields are rejected as "metrics this report does not publish" | Growth vs previous period needs a second raw pull | new (beta feedback) |
 | P1 | 429 semantics on MCP tool calls (HTTP 429 vs JSON-RPC error; `retryAfter` in the tool error) | Back-off is best-effort | new |
+| P2 | `hyros_get_marginal_cac_curve`: flag thin curves (`INSUFFICIENT_DATA` was absent on 3 spend levels / 19 days, two levels with no customers) and document the threshold | A thin curve renders without a warning | new (beta feedback) |
+| P2 | Source, category and link names stored with a letter substitution (`dbbduvat` for `coaching`, `fzbvy-cebbedbfg` for `email-broadcast`: a–e shifted +1, g–z +13), seen in the HYROS app itself — which creation path could store names encoded? | Garbled names in every source-based tab | new (question, cause unconfirmed) |
 | P2 | Honour the `fields` projection on `/attribution` (payloads are ~90% null, ~120 fields per row) or document that it does not trim | Payload size; unverified on the bound account | open |
 | P2 | Explicit error (or `SOURCE_CATEGORY` semantics) for `facebook_campaign` instead of `[]` | Silent empty array reads as missing data | open |
 | P2 | `income` / LTV fields on the Lead object | CRM Income needs a capped sales join | open |
@@ -317,7 +325,7 @@ a documentation ask.
 | CRM / leads | ~85% | Income needs a sales join; no `updatedSince` on sales/calls/subscriptions; lists capped with a `truncated` flag |
 | Tracking in/out | ~95% | Async writes; caller-managed idempotency |
 | Live updating | ~60% | Webhooks exist but the template still polls; reports are async |
-| Scale Advisor | 0% today | The curve tool returns 404 |
+| Scale Advisor | ~70% | The curve tool answers (since late Sep); no account-level ceiling, no thin-data flag |
 
 ## 17. What the dashboard does with all this (as of 0.2.0)
 
@@ -337,7 +345,7 @@ a documentation ask.
   and a warning instead of failing.
 - IANA timezones and ISO datetimes with offset on every date parameter;
   legacy `EEE MMM dd …` dates parsed; `leadStage` validated on save.
-- Scale Advisor parses the documented curve shape and surfaces the 404.
+- Scale Advisor parses the documented curve shape and surfaces a failing tool (404 until late September) as an error card.
 - `/api/health` returns `templateVersion` and `missingTools` (tools the
   account's `tools/list` lacks); refresh and setup failures are logged as
   JSON event lines in the Vercel runtime logs (no keys, no emails).
