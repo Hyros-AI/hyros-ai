@@ -172,6 +172,7 @@ button.drill:active, button.name-drill:active, .cohort-row:active { transform: n
 .meta { color: var(--ink-2); font-size: 12.5px; display: flex; align-items: center; flex-wrap: wrap; }
 .meta b { color: var(--ink); font-weight: 500; }
 .meta .warn { color: var(--warn); }
+.col-opt.off { opacity: .55; cursor: not-allowed; }
 .meta .warn summary { cursor: pointer; list-style: none; }
 .meta .warn summary::-webkit-details-marker { display: none; }
 .meta .warn summary::after { content: " ▾"; font-size: 10px; }

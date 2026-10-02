@@ -27,11 +27,10 @@ import { CATALOG, derive, aggregate, rollup } from '../public/shared/metrics.js'
 /** A build with no explicit budget gets the whole refresh budget (api/_budget.js). */
 export const DEFAULT_BUDGET_MS = REFRESH_BUDGET_MS;
 
-// Request the ENTIRE catalog: the `fields` param drives computation (verified
-// empirically — requested fields populate, unrequested come back null), and the
-// response carries every key either way, so the marginal wire cost is zero.
-// This is what makes column-adding instant client-side instead of per-refresh.
-const REPORT_FIELDS = ['NAME', 'PARENT_NAME', ...CATALOG.map((c) => c.f)];
+// Request the whole catalog except switched-off metrics: the `fields` param
+// drives computation (requested fields populate, unrequested come back null),
+// which makes column-adding instant client-side instead of per-refresh.
+const REPORT_FIELDS = ['NAME', 'PARENT_NAME', ...CATALOG.filter((c) => !c.off).map((c) => c.f)];
 
 /* ---------------- date helpers (account timezone) ---------------- */
 
@@ -257,10 +256,31 @@ export function mergeLeads(previousLeads, changedLeads, leadsFrom) {
     .sort((a, b) => String(b.joined || '').localeCompare(String(a.joined || '')));
 }
 
+/**
+ * Incremental sales/calls: rows changed since the last sync replace their
+ * older copies, rows made before the window drop
+ * off, newest first. Deleted records carry no marker, so they linger until
+ * they leave the window or a full pull (previous older than 7 days) runs.
+ */
+export function mergeRecords(previousRows, changedRows, from) {
+  const byId = new Map();
+  for (const r of previousRows || []) if (r?.id) byId.set(r.id, r);
+  for (const r of changedRows || []) if (r?.id) byId.set(r.id, r);
+  const floor = `${from}T00:00:00`;
+  return [...byId.values()]
+    .filter((r) => !r.date || String(r.date).slice(0, 19) >= floor)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
 /** Previous window overlaps the new one and its real sync is recent enough to build on. */
+/** The previous CRM lost rows to the store size cap (flag since 0.2.6, warning text 0.2.3–0.2.5). */
+const trimmedForSize = (previous) => Boolean(previous?.crm?.sync?.sizeTrimmed)
+  || (previous?.warnings || []).some((w) => w?.level === 'crm' && /snapshot over .* MB/.test(String(w.error || '')));
+
 function canSyncIncrementally({ previous, prevAt, leadsFrom, leadsTo }) {
   const win = previous?.crm?.window;
   if (!Array.isArray(previous?.crm?.leads) || !win?.from || !win?.to || !prevAt) return false;
+  if (trimmedForSize(previous)) return false;
   const overlaps = win.from <= leadsTo && win.to >= leadsFrom;
   const recent = prevAt <= leadsTo && prevAt >= addDays(leadsTo, -INCREMENTAL_MAX_AGE_DAYS);
   return overlaps && recent;
@@ -271,10 +291,10 @@ const INCREMENTAL_MAX_AGE_DAYS = 7;
 
 async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(), deadline = null, tz = 'UTC', stages = [] }) {
   // Incremental: when the previous snapshot is recent enough, pull only the
-  // leads updated since it was built (a lead's lastUpdatedDate moves on
-  // creation too, so new joins are included). Sales/calls/subscriptions have
-  // no updated-since filter yet and are pulled in full. A stale (reused) CRM
-  // keeps sync.syncedAt from the build that really pulled, so that is the base.
+  // leads, sales and calls updated since it was built (lastUpdatedDate moves
+  // on creation too, so new rows are included). Subscriptions are still pulled
+  // in full. A stale (reused) CRM keeps sync.syncedAt from the build that
+  // really pulled, so that is the base.
   const prevLeads = previous?.crm?.leads;
   const prevSynced = previous?.crm?.sync?.syncedAt || previous?.generatedAt;
   const prevAt = prevSynced ? String(prevSynced).slice(0, 10) : null;
@@ -286,6 +306,10 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
   const leadsRequest = incremental
     ? { updatedFromDate: dayStart(addDays(prevAt, -1), tz), updatedToDate: to }
     : { fromDate: from, toDate: to };
+  // A previous snapshot without the list (older template) cannot be merged onto.
+  const salesIncremental = incremental && Array.isArray(previous?.crm?.sales);
+  const callsIncremental = incremental && Array.isArray(previous?.crm?.calls);
+  const fullRequest = { fromDate: from, toDate: to };
 
   // The four lists page in parallel up to CRM_MAX_PAGES (10,000 rows each)
   // and every one stops at `deadline` (the CRM's reservation); the cap, an
@@ -294,8 +318,8 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
   const paged = { pageSize: 250, deadline, maxPages: CRM_MAX_PAGES };
   const [leadsPage, salesPage, callsPage, subsPage] = await Promise.all([
     callToolPagedInfo('hyros_get_leads', { request: leadsRequest }, paged),
-    callToolPagedInfo('hyros_get_sales', { request: { fromDate: from, toDate: to } }, paged),
-    callToolPagedInfo('hyros_get_calls', { request: { fromDate: from, toDate: to } }, paged),
+    callToolPagedInfo('hyros_get_sales', { request: salesIncremental ? leadsRequest : fullRequest }, paged),
+    callToolPagedInfo('hyros_get_calls', { request: callsIncremental ? leadsRequest : fullRequest }, paged),
     callToolPagedInfo('hyros_get_subscriptions', { request: { fromDate: from, toDate: to } }, paged),
   ]);
   const leadsRaw = leadsPage.rows;
@@ -305,7 +329,9 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
   const truncated = {
     // A merge on top of a truncated base is still truncated.
     leads: leadsPage.truncated || Boolean(incremental && previous?.crm?.sync?.truncated?.leads),
-    sales: salesPage.truncated, calls: callsPage.truncated, subscriptions: subsPage.truncated,
+    sales: salesPage.truncated || Boolean(salesIncremental && previous?.crm?.sync?.truncated?.sales),
+    calls: callsPage.truncated || Boolean(callsIncremental && previous?.crm?.sync?.truncated?.calls),
+    subscriptions: subsPage.truncated,
   };
   const truncationErrors = Object.entries({ leads: leadsPage, sales: salesPage, calls: callsPage, subscriptions: subsPage })
     .filter(([, p]) => p.truncated)
@@ -314,16 +340,6 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
   // Response dates: leads are ISO, sales/calls/subscriptions use the legacy
   // `EEE MMM dd HH:mm:ss zzz yyyy` form (docs); store ISO everywhere.
   const iso = (v) => parseHyrosDate(v, offsetSuffix(tz));
-
-  // Income per lead: the lead object has no revenue field, so join sales by
-  // email. Amounts are summed as reported (usdPrice when present, else the
-  // documented price object) — a mixed-currency account sums face values.
-  const incomeByEmail = new Map();
-  for (const sale of salesRaw) {
-    const email = (sale.lead?.email || '').toLowerCase();
-    if (!email) continue;
-    incomeByEmail.set(email, (incomeByEmail.get(email) || 0) + priceOf(sale).amount);
-  }
 
   const fetchedLeads = leadsRaw.map((l) => {
     const first = flattenSource(l.firstSource, iso);
@@ -348,16 +364,12 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
     };
   });
 
-  const leads = (incremental ? mergeLeads(prevLeads, fetchedLeads, leadsFrom) : fetchedLeads.filter((l) => !l.mergedInto))
-    // Income is re-joined from the fresh sales pull for every lead, merged or not.
-    .map(({ mergedInto, ...l }) => ({ ...l, income: incomeByEmail.get((l.email || '').toLowerCase()) || 0 }));
-
   const leadName = (l) =>
     [l?.firstName, l?.lastName].filter(Boolean).join(' ').trim() || null;
   const srcName = (src) => src?.name || null;
   const srcAd = (src) => src?.sourceLinkAd?.name || null;
 
-  const sales = salesRaw.map((s) => ({
+  const fetchedSales = salesRaw.map((s) => ({
     id: s.id,
     email: s.lead?.email || '',
     leadName: leadName(s.lead),
@@ -373,7 +385,7 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
 
   // Calls carry FULL attribution on the call object itself (source, category
   // and the specific ad) — richer than the lead row.
-  const calls = callsRaw.map((c) => ({
+  const fetchedCalls = callsRaw.map((c) => ({
     id: c.id,
     email: c.lead?.email || '',
     leadName: leadName(c.lead),
@@ -385,6 +397,22 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
     ad: srcAd(c.firstSource) || srcAd(c.lastSource),
     lastSource: srcName(c.lastSource),
   }));
+
+  const sales = salesIncremental ? mergeRecords(previous.crm.sales, fetchedSales, leadsFrom) : fetchedSales;
+  const calls = callsIncremental ? mergeRecords(previous.crm.calls, fetchedCalls, leadsFrom) : fetchedCalls;
+
+  // Income per lead: the lead object has no revenue field, so join the
+  // window's sales by email. Amounts are summed as reported (usdPrice when
+  // present, else the documented price object) — a mixed-currency account
+  // sums face values.
+  const incomeByEmail = new Map();
+  for (const sale of sales) {
+    const email = (sale.email || '').toLowerCase();
+    if (!email) continue;
+    incomeByEmail.set(email, (incomeByEmail.get(email) || 0) + (sale.amount || 0));
+  }
+  const leads = (incremental ? mergeLeads(prevLeads, fetchedLeads, leadsFrom) : fetchedLeads.filter((l) => !l.mergedInto))
+    .map(({ mergedInto, ...l }) => ({ ...l, income: incomeByEmail.get((l.email || '').toLowerCase()) || 0 }));
 
   const subscriptions = subsRaw.map((x) => ({
     id: x.id || x.subscriptionId || null,
@@ -407,7 +435,7 @@ async function buildCrm({ leadsFrom, leadsTo, previous = null, now = new Date(),
     subscriptions,
     stages: stages.map((s) => ({ name: s.name, amount: s.amount })),
     window: { from: leadsFrom, to: leadsTo },
-    sync: { incremental, leadsFetched: fetchedLeads.length, syncedAt: now.toISOString(), truncated },
+    sync: { incremental, leadsFetched: fetchedLeads.length, salesFetched: fetchedSales.length, callsFetched: fetchedCalls.length, syncedAt: now.toISOString(), truncated },
     totals: crmTotals(leads, calls, subscriptions),
   };
   // `notes` are the truncation reasons for snapshot.warnings (kind 'truncated').
@@ -431,13 +459,46 @@ export const SNAPSHOT_MAX_BYTES = 9 * 1024 * 1024;
 const CRM_LISTS = ['leads', 'sales', 'calls', 'subscriptions'];
 
 /**
+ * Where a snapshot's bytes go, largest first: one part per range level
+ * (`ranges.30d.adset`), per CRM list (`crm.leads`) and per other top-level
+ * key. `nullBytes` is what null-valued report fields cost — the report
+ * returns every requested metric, most of them null on most rows.
+ */
+export function snapshotSizeBreakdown(snapshot, top = 15) {
+  const size = (o) => Buffer.byteLength(JSON.stringify(o === undefined ? null : o));
+  const parts = [];
+  for (const [key, value] of Object.entries(snapshot || {})) {
+    if (key === 'ranges' && value && typeof value === 'object') {
+      for (const [r, range] of Object.entries(value)) {
+        for (const [level, rows] of Object.entries(range?.levels || {})) parts.push({ key: `ranges.${r}.${level}`, bytes: size(rows) });
+      }
+    } else if (key === 'crm' && value && typeof value === 'object') {
+      for (const list of CRM_LISTS) if (Array.isArray(value[list])) parts.push({ key: `crm.${list}`, bytes: size(value[list]) });
+    } else {
+      parts.push({ key, bytes: size(value) });
+    }
+  }
+  parts.sort((a, b) => b.bytes - a.bytes);
+  const total = size(snapshot);
+  const noNulls = (rows) => (Array.isArray(rows)
+    ? rows.map((row) => (row && typeof row === 'object' ? Object.fromEntries(Object.entries(row).filter(([, v]) => v !== null)) : row))
+    : rows);
+  const nullBytes = snapshot?.ranges
+    ? total - size({ ...snapshot, ranges: Object.fromEntries(Object.entries(snapshot.ranges).map(([r, range]) => [r, range?.levels
+      ? { ...range, levels: Object.fromEntries(Object.entries(range.levels).map(([l, rows]) => [l, noNulls(rows)])) }
+      : range])) })
+    : 0;
+  return { total, nullBytes, parts: parts.slice(0, top) };
+}
+
+/**
  * Trim a snapshot that would not fit the store's request limit: the longest
  * CRM list loses its oldest rows (lists are newest-first) until the JSON fits,
  * the trimmed lists are flagged `truncated`, totals are recomputed and a
  * warning says what was kept. Below the limit the snapshot is returned as is.
  */
-export function fitSnapshot(snapshot, maxBytes = SNAPSHOT_MAX_BYTES) {
-  const size = (o) => Buffer.byteLength(JSON.stringify(o));
+export function fitSnapshot(snapshot, maxBytes = SNAPSHOT_MAX_BYTES, measure = null) {
+  const size = measure || ((o) => Buffer.byteLength(JSON.stringify(o)));
   if (!snapshot?.crm || size(snapshot) <= maxBytes) return snapshot;
   const crm = { ...snapshot.crm, sync: { ...(snapshot.crm.sync || {}), truncated: { ...(snapshot.crm.sync?.truncated || {}) } } };
   const out = { ...snapshot, crm, warnings: [...(snapshot.warnings || [])] };
@@ -453,6 +514,8 @@ export function fitSnapshot(snapshot, maxBytes = SNAPSHOT_MAX_BYTES) {
     kept[list] = keep;
   }
   crm.totals = crmTotals(crm.leads || [], crm.calls || [], crm.subscriptions || []);
+  // An incremental build on a trimmed list would never get the dropped rows back.
+  crm.sync.sizeTrimmed = true;
   const summary = Object.entries(kept).map(([k, n]) => `${n} ${k}`).join(', ');
   out.warnings.push({ adAccountId: null, name: null, type: null, level: 'crm', error: `snapshot over ${Math.round(maxBytes / 1024 / 1024)} MB (the store's request limit): kept the newest ${summary}`, kind: 'truncated' });
   return out;

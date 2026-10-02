@@ -77,6 +77,14 @@ console.log('\nRollup: derived metrics are RE-derived, never averaged');
   check('CTR  re-derived      = 5.00%', parent.ctr, 5);
 }
 
+console.log('\nLTV fields switched off while HYROS returns 0 for them (HMCP-359)');
+{
+  const ltv = CATALOG.filter((c) => /^LTV_/.test(c.f));
+  check('all 10 LTV fields carry an off reason naming HMCP-359', ltv.length === 10 && ltv.every((c) => /HMCP-359/.test(c.off || '')), true);
+  check('no other metric is switched off', CATALOG.filter((c) => c.off).length, 10);
+  check('no LTV field is a default column', DEFAULT_KEYS.some((k) => ltv.some((c) => c.k === k)), false);
+}
+
 console.log('\nSeed snapshot integrity (synthetic, generated from public/demo.js)');
 {
   const seed = JSON.parse(await readFile(new URL('../data/seed.json', import.meta.url), 'utf8'));

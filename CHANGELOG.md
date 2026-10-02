@@ -4,6 +4,48 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] — 2026-10-02
+
+### Changed
+- **LTV columns are switched off.** HYROS returns 0 for every LTV field
+  (`LTV_*` and `LTV_*_FORECAST`) on the attribution and public reports,
+  confirmed on three accounts (HMCP-359). The 10 LTV metrics carry an `off`
+  reason in the catalog: they are no longer requested from the report, show
+  greyed out as "unavailable" in the column picker, and are dropped from
+  saved column sets, so nobody reads a $0 LTV as real. Remove `off` from
+  `public/shared/metrics.js` when HYROS fixes it.
+- **Sales and calls sync incrementally**, like leads: when the previous
+  snapshot is recent, `hyros_get_sales` and `hyros_get_calls` are called
+  with `updatedFromDate` and the changed rows are merged by id, rows made
+  before the window drop off, and income is
+  joined from the merged sales. `crm.sync` gains `salesFetched` and
+  `callsFetched`; a merge on a truncated list stays truncated.
+  Subscriptions are still a full pull. A refund reaches the CRM when HYROS
+  moves the sale's update date on refund (not yet verified live); if it
+  does not, the refunded flag lags until the next full pull (at most 7 days).
+  Saved column sets with nothing usable left fall back to the defaults.
+
+### Fixed
+- **Large accounts no longer lose CRM rows to the store limit.** The
+  snapshot was written as plain JSON in one request, so an account whose
+  snapshot passed 9 MB had its leads trimmed on every refresh, and each
+  incremental refresh built on the already-trimmed list, so the count kept
+  shrinking (884, then 758 leads on a beta account). Snapshots are now
+  stored gzip-compressed (`gz1:` + base64, about 5× smaller; plain JSON from
+  older versions still reads), the 9 MB cap is measured on the compressed
+  bytes, and a trim (rare now) sets `crm.sync.sizeTrimmed`. A previous
+  snapshot that was trimmed (that flag, or the 0.2.3–0.2.5 warning) makes
+  the next refresh pull leads, sales and calls in full, so one Refresh
+  after updating brings every lead back.
+
+### Added
+- **Snapshot size breakdown.** `/api/refresh` answers with `size`: total
+  JSON bytes, `storedBytes` (compressed, what the store limit sees),
+  `nullBytes` (what null report fields cost) and the largest parts
+  (`ranges.<range>.<level>`, `crm.<list>`, other top-level keys). It is in
+  Copy diagnostics and in the `refresh.ok` log line, so an account near the
+  10 MB store limit shows where its bytes go.
+
 ## [0.2.5] — 2026-09-30
 
 Beta feedback from a live account (checkpoint of 2026-09-30).

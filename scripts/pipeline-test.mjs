@@ -113,6 +113,8 @@ try {
   check('non-Meta ad rows keep parentId too', snap.ranges['30d'].levels.ad.some((a) => a.id === '9002-ad-1' && a.parentId === '9002-1'));
 
   check('CRM full sync (no previous)', snap.crm.sync.incremental === false && snap.crm.leads.length === 3);
+  const attrFields = calls.find((c) => c.name === 'hyros_get_attribution_report')?.args.request.fields || [];
+  check('switched-off LTV fields are not requested from the report', !attrFields.some((f) => /^LTV_/.test(f)) && attrFields.includes('TOTAL_REVENUE'), JSON.stringify(attrFields.filter((f) => /LTV|TOTAL_REVENUE/.test(f))));
   const s1 = snap.crm.sales.find((s) => s.id === 's1');
   const s2 = snap.crm.sales.find((s) => s.id === 's2');
   check('sale amount comes from the documented price (account currency), usdPrice kept as usdAmount', s1?.amount === 149 && s1?.currency === 'USD' && s1?.usdAmount === 160 && s1?.date === '2026-09-05T12:00:00-05:00', JSON.stringify(s1));
@@ -286,6 +288,30 @@ try {
   check('merged: a lead HYROS merged into another (originLead) is dropped', !snap2.crm.leads.some((l) => l.id === 'lead-2') && !('mergedInto' in snap2.crm.leads[0]), JSON.stringify(snap2.crm.leads.map((l) => l.id)));
   check('merged: income re-joined from fresh sales', snap2.crm.leads.find((l) => l.id === 'lead-1')?.income === 149);
   check('merged: no duplicates', new Set(snap2.crm.leads.map((l) => l.id)).size === snap2.crm.leads.length);
+  const salesReq = calls.find((c) => c.name === 'hyros_get_sales')?.args.request;
+  const callsReq = calls.find((c) => c.name === 'hyros_get_calls')?.args.request;
+  check('sales and calls pulled with updatedFromDate', Boolean(salesReq?.updatedFromDate) && !salesReq?.fromDate && Boolean(callsReq?.updatedFromDate) && !callsReq?.fromDate, JSON.stringify([salesReq, callsReq]));
+  check('subscriptions are still a full pull', Boolean(calls.find((c) => c.name === 'hyros_get_subscriptions')?.args.request.fromDate));
+  check('merged sales: a changed sale is updated in place (now refunded)', snap2.crm.sales.find((s) => s.id === 's1')?.refunded === true, JSON.stringify(snap2.crm.sales.find((s) => s.id === 's1')));
+  check('merged sales: the new sale is added, no duplicates', snap2.crm.sales.some((s) => s.id === 's3') && new Set(snap2.crm.sales.map((s) => s.id)).size === snap2.crm.sales.length, JSON.stringify(snap2.crm.sales.map((s) => s.id)));
+  check('merged sales: a sale made before the window drops off', !snap2.crm.sales.some((s) => s.id === 's2'), JSON.stringify(snap2.crm.sales.map((s) => [s.id, s.date])));
+  check('merged calls: the new call is added', snap2.crm.calls.some((c) => c.id === 'call-9') && snap2.crm.totals.calls === snap2.crm.calls.length, JSON.stringify(snap2.crm.calls.map((c) => c.id)));
+  check('income is joined from the merged sales (the new sale counts)', snap2.crm.leads.find((l) => l.id === 'lead-9')?.income === 50, JSON.stringify(snap2.crm.leads.find((l) => l.id === 'lead-9')));
+  check('sync counts what each list fetched', snap2.crm.sync.salesFetched === 2 && snap2.crm.sync.callsFetched === 1, JSON.stringify(snap2.crm.sync));
+  const truncBase = { ...snap, crm: { ...snap.crm, sync: { ...snap.crm.sync, truncated: { ...snap.crm.sync.truncated, sales: true } } } };
+  const snapTB = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs, previous: truncBase });
+  check('a merge on top of truncated sales stays truncated', snapTB.crm.sync.truncated.sales === true && snapTB.crm.sync.truncated.calls === false, JSON.stringify(snapTB.crm.sync.truncated));
+
+  console.log('\nA CRM trimmed for size is rebuilt with a full pull');
+  calls.length = 0;
+  const trimmedPrev = { ...snap, crm: { ...snap.crm, leads: snap.crm.leads.slice(0, 1), sync: { ...snap.crm.sync, sizeTrimmed: true, truncated: { ...snap.crm.sync.truncated, leads: true } } } };
+  const rebuilt = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs, previous: trimmedPrev });
+  check('previous trimmed (sizeTrimmed): leads, sales and calls are full pulls', rebuilt.crm.sync.incremental === false && Boolean(calls.find((c) => c.name === 'hyros_get_leads')?.args.request.fromDate) && Boolean(calls.find((c) => c.name === 'hyros_get_sales')?.args.request.fromDate), JSON.stringify(rebuilt.crm.sync));
+  check('…every lead is back and the list is no longer truncated', rebuilt.crm.leads.length === 3 && rebuilt.crm.sync.truncated.leads === false, JSON.stringify([rebuilt.crm.leads.length, rebuilt.crm.sync.truncated]));
+  calls.length = 0;
+  const legacyTrimmed = { ...snap, warnings: [{ level: 'crm', kind: 'truncated', error: "snapshot over 9 MB (the store's request limit): kept the newest 758 leads" }] };
+  const rebuiltLegacy = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs, previous: legacyTrimmed });
+  check('a 0.2.3–0.2.5 snapshot trimmed for size (warning only) also gets a full pull', rebuiltLegacy.crm.sync.incremental === false, JSON.stringify(rebuiltLegacy.crm.sync));
 
   console.log('\nDaily cron: day 2 builds incrementally on top of day 1 (window moves, still overlaps)');
   calls.length = 0;
@@ -415,6 +441,8 @@ try {
   check('agency key NOT marked invalid by a client 403; lastError recorded', after403.find((a) => a.id === added.account.id).keyStatus === 'ok' && /Not authorized/.test(after403.find((a) => a.id === cli.id).lastError || ''), JSON.stringify(after403.map((a) => [a.id, a.keyStatus, a.lastError])));
   rr = fakeRes();
   await refresh({ url: `/api/refresh?account=${cli.id}`, headers: { host: 'x', authorization: 'Bearer cron-s' } }, rr);
+  check('a good refresh reports the snapshot size breakdown', rr.body?.size?.total > 0 && Array.isArray(rr.body.size.parts) && rr.body.size.parts.length > 0 && typeof rr.body.size.nullBytes === 'number', JSON.stringify(rr.body?.size));
+  check('…including the compressed bytes actually stored', rr.body?.size?.storedBytes > 0 && rr.body.size.storedBytes < rr.body.size.total, JSON.stringify(rr.body?.size && { total: rr.body.size.total, storedBytes: rr.body.size.storedBytes }));
   check('a good refresh reports storeConfigured + persisted and logs refresh.ok with the warning count', rr.code === 200 && rr.body?.ok === true && rr.body.storeConfigured === true && rr.body.persisted === true && events('refresh.ok').some((e) => e.accountId === cli.id && typeof e.ms === 'number' && e.warnings === 3), JSON.stringify([rr.body?.storeConfigured, rr.body?.persisted, events('refresh.ok')]));
   const c = rr.body?.counts || {};
   check('a good refresh reports budgetMs, elapsedMs (= ms) and counts { leads, sales, calls, subscriptions, warnings }', rr.body?.budgetMs === budget.REFRESH_BUDGET_MS && typeof rr.body?.elapsedMs === 'number' && rr.body.elapsedMs === rr.body.ms && c.leads === 3 && c.sales === 2 && c.calls === 0 && c.subscriptions === 0 && c.warnings === 3, JSON.stringify([rr.body?.budgetMs, rr.body?.elapsedMs, c]));

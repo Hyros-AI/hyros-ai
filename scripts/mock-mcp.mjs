@@ -179,8 +179,17 @@ const TOOLS = {
     if (request.tags) return { result: [lead(1, '2026-09-02T10:00:00-05:00', '2026-09-02T10:00:00-05:00')], nextPageId: null };
     return { result: [1, 2, 3].map((i) => lead(i, `2026-09-0${i}T10:00:00-05:00`, `2026-09-0${i}T10:00:00-05:00`)), nextPageId: null };
   },
-  hyros_get_sales: () => ({ result: SALES, nextPageId: null }),
-  hyros_get_calls: () => ({ result: [], nextPageId: null }),
+  hyros_get_sales: ({ request }) => {
+    // Incremental pull: s1 was refunded since, s3 is a new sale (lead-9).
+    if (request?.updatedFromDate) return { result: [
+      { ...SALES[0], refundDate: '2026-09-13T09:00:00-05:00' },
+      { id: 's3', lead: { email: 'lead9@example.test', firstName: 'Lead', lastName: '9' }, creationDate: '2026-09-13T08:30:00-05:00', price: { price: 50, currency: 'USD' }, product: { name: 'Starter' }, firstSource: { name: 'Powerset' }, lastSource: { name: 'Powerset' } },
+    ], nextPageId: null };
+    return { result: SALES, nextPageId: null };
+  },
+  hyros_get_calls: ({ request }) => (request?.updatedFromDate
+    ? { result: [{ id: 'call-9', lead: { email: 'lead9@example.test', firstName: 'Lead', lastName: '9' }, creationDate: '2026-09-13T11:00:00-05:00', state: 'QUALIFIED', qualified: true }], nextPageId: null }
+    : { result: [], nextPageId: null }),
   hyros_get_subscriptions: () => ({ result: [], nextPageId: null }),
   hyros_get_lead_journey: ({ request, emails }) => journeyEmails(request, emails).map((email) => ({
     lead: lead(1, '2026-09-02T10:00:00-05:00', '2026-09-02T10:00:00-05:00'),

@@ -28,6 +28,8 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
  *       from additive parts) · null non-aggregatable (native rows only —
  *       rolled-up Campaign/Traffic/Account rows show "—")
  */
+const OFF_LTV = 'HYROS returns 0 for every LTV field today (HMCP-359), so the column is switched off until it is fixed.';
+
 export const CATALOG = [
   // Core
   { k: 'clicks',            f: 'CLICKS',             l: 'Clicks',            t: 'int',   g: 'Core', a: 's' },
@@ -122,17 +124,18 @@ export const CATALOG = [
   { k: 'convertedTrials',       f: 'CONVERTED_TRIALS',       l: 'Converted Trials',t: 'int',  g: 'Subscriptions', a: 's' },
   { k: 'canceledTrials',        f: 'CANCELED_TRIALS',        l: 'Canceled Trials',t: 'int',   g: 'Subscriptions', a: 's' },
 
-  // LTV & forecasts — per-customer values; never summable across sources
-  { k: 'ltv30Days',   f: 'LTV_30_DAYS',   l: 'LTV 30d',  t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltv60Days',   f: 'LTV_60_DAYS',   l: 'LTV 60d',  t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltv90Days',   f: 'LTV_90_DAYS',   l: 'LTV 90d',  t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltv6Months',  f: 'LTV_6_MONTHS',  l: 'LTV 6mo',  t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltv1Year',    f: 'LTV_1_YEAR',    l: 'LTV 1yr',  t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltvForecast30Days',  f: 'LTV_30_DAYS_FORECAST',  l: 'LTV 30d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltvForecast60Days',  f: 'LTV_60_DAYS_FORECAST',  l: 'LTV 60d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltvForecast90Days',  f: 'LTV_90_DAYS_FORECAST',  l: 'LTV 90d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltvForecast6Months', f: 'LTV_6_MONTHS_FORECAST', l: 'LTV 6mo (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
-  { k: 'ltvForecast1Year',   f: 'LTV_1_YEAR_FORECAST',   l: 'LTV 1yr (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
+  // LTV & forecasts — per-customer values; never summable across sources.
+  // `off`: not requested and not selectable while HYROS returns 0 for them.
+  { k: 'ltv30Days',   f: 'LTV_30_DAYS',   l: 'LTV 30d',  t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltv60Days',   f: 'LTV_60_DAYS',   l: 'LTV 60d',  t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltv90Days',   f: 'LTV_90_DAYS',   l: 'LTV 90d',  t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltv6Months',  f: 'LTV_6_MONTHS',  l: 'LTV 6mo',  t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltv1Year',    f: 'LTV_1_YEAR',    l: 'LTV 1yr',  t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltvForecast30Days',  f: 'LTV_30_DAYS_FORECAST',  l: 'LTV 30d (fcst)', t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltvForecast60Days',  f: 'LTV_60_DAYS_FORECAST',  l: 'LTV 60d (fcst)', t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltvForecast90Days',  f: 'LTV_90_DAYS_FORECAST',  l: 'LTV 90d (fcst)', t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltvForecast6Months', f: 'LTV_6_MONTHS_FORECAST', l: 'LTV 6mo (fcst)', t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
+  { k: 'ltvForecast1Year',   f: 'LTV_1_YEAR_FORECAST',   l: 'LTV 1yr (fcst)', t: 'money', g: 'LTV & forecasts', a: null, off: OFF_LTV },
   { k: 'subscription30DaysForecast', f: 'SUBSCRIPTION_30_DAYS_FORECAST', l: 'Sub Rev 30d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
   { k: 'subscription60DaysForecast', f: 'SUBSCRIPTION_60_DAYS_FORECAST', l: 'Sub Rev 60d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },
   { k: 'subscription90DaysForecast', f: 'SUBSCRIPTION_90_DAYS_FORECAST', l: 'Sub Rev 90d (fcst)', t: 'money', g: 'LTV & forecasts', a: null },

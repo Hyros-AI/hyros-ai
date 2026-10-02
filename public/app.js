@@ -85,18 +85,20 @@ function activeCols() {
   return state.cols.map((k) => CATALOG_BY_KEY.get(k)).filter(Boolean);
 }
 
+/** A saved column that still exists and is not switched off. */
+const usableCol = (k) => CATALOG_BY_KEY.has(k) && !CATALOG_BY_KEY.get(k).off;
+const SELECTABLE = CATALOG.filter((c) => !c.off).length;
+
+/** Usable columns of a saved set, or null when nothing in it survives. */
+const usableCols = (saved) => {
+  const cols = Array.isArray(saved) ? saved.filter(usableCol) : [];
+  return cols.length ? cols : null;
+};
+
 function resolveCols() {
-  try {
-    const stored = JSON.parse(localStorage.getItem('aihyros_cols'));
-    if (Array.isArray(stored) && stored.length) {
-      state.cols = stored.filter((k) => CATALOG_BY_KEY.has(k));
-      return;
-    }
-  } catch { /* fall through */ }
-  const server = state.serverPrefs?.cols;
-  state.cols = Array.isArray(server) && server.length
-    ? server.filter((k) => CATALOG_BY_KEY.has(k))
-    : [...DEFAULT_KEYS];
+  let stored = null;
+  try { stored = usableCols(JSON.parse(localStorage.getItem('aihyros_cols'))); } catch { /* fall through */ }
+  state.cols = stored || usableCols(state.serverPrefs?.cols) || [...DEFAULT_KEYS];
 }
 
 function persistColsLocal() {
@@ -1221,6 +1223,7 @@ function recordRefresh(body, kind) {
     message: body?.ok ? null : (body?.message || null),
     steps: Array.isArray(body?.steps) ? body.steps.slice(-40) : null,
     counts: body?.counts || null,
+    size: body?.size || null,
   };
 }
 
@@ -1262,15 +1265,15 @@ function renderColPanel() {
     <div class="col-group">
       <div class="col-group-title">${esc(group)}</div>
       ${entries.map((c) => `
-        <label class="col-opt ${c.a === null ? 'nonagg' : ''}"
-               title="${c.a === null ? 'Native metric — shows at Ad Set / Ad level; rolled-up Campaign/Traffic rows show —' : ''}">
-          <input type="checkbox" data-key="${c.k}" ${selected.has(c.k) ? 'checked' : ''}>
+        <label class="col-opt ${c.a === null ? 'nonagg' : ''}${c.off ? ' off' : ''}"
+               title="${esc(c.off || (c.a === null ? 'Native metric — shows at Ad Set / Ad level; rolled-up Campaign/Traffic rows show —' : ''))}">
+          <input type="checkbox" data-key="${c.k}" ${selected.has(c.k) ? 'checked' : ''}${c.off ? ' disabled' : ''}>
           <span>${esc(c.l)}</span>
-          ${c.a === null ? '<span class="pill">native</span>' : ''}
+          ${c.off ? '<span class="pill warn">unavailable</span>' : c.a === null ? '<span class="pill">native</span>' : ''}
         </label>`).join('')}
     </div>`).join('') || '<div class="empty">No metrics match.</div>';
 
-  $('colCount').textContent = `${state.cols.length} of ${CATALOG.length} columns`;
+  $('colCount').textContent = `${state.cols.length} of ${SELECTABLE} columns`;
 
   $('colGroups').querySelectorAll('input[type=checkbox]').forEach((cb) => {
     cb.addEventListener('change', () => {
@@ -1279,7 +1282,7 @@ function renderColPanel() {
         ? [...state.cols, key]
         : state.cols.filter((k) => k !== key);
       persistColsLocal();
-      $('colCount').textContent = `${state.cols.length} of ${CATALOG.length} columns`;
+      $('colCount').textContent = `${state.cols.length} of ${SELECTABLE} columns`;
       renderReport();
     });
   });
@@ -1297,8 +1300,7 @@ $('colSearch').addEventListener('input', renderColPanel);
 $('colReset').addEventListener('click', () => {
   localStorage.removeItem('aihyros_cols');
   const server = state.serverPrefs?.cols;
-  state.cols = Array.isArray(server) && server.length
-    ? server.filter((k) => CATALOG_BY_KEY.has(k)) : [...DEFAULT_KEYS];
+  state.cols = usableCols(server) || [...DEFAULT_KEYS];
   renderColPanel();
   renderReport();
 });

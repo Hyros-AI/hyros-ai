@@ -9,8 +9,8 @@
  * only trace a template owner has when a user reports "it failed".
  */
 import { checkAccess, isCron, deny } from './_auth.js';
-import { buildSnapshot, fitSnapshot } from './_snapshot.js';
-import { writeSnapshot, readSnapshot, readPrefs, storeConfigured, storeReadOnly, kvRaw } from './_store.js';
+import { buildSnapshot, fitSnapshot, snapshotSizeBreakdown } from './_snapshot.js';
+import { writeSnapshot, readSnapshot, readPrefs, storeConfigured, storeReadOnly, kvRaw, storedSnapshotBytes } from './_store.js';
 import { McpNotConfigured } from './_mcp.js';
 import { accountFromReq, asAccount, listAccounts, markKeyStatus, noteRefresh, syncClients } from './_accounts.js';
 import { logEvent } from './_log.js';
@@ -45,11 +45,13 @@ async function refreshAccount(accountId, steps, budgetMs) {
     }
     throw err;
   }
-  snapshot = fitSnapshot(snapshot);
+  // The cap applies to what is stored (compressed), not to the JSON size.
+  snapshot = fitSnapshot(snapshot, undefined, storedSnapshotBytes);
+  const size = { ...snapshotSizeBreakdown(snapshot), storedBytes: storedSnapshotBytes(snapshot) };
   const persisted = storeConfigured() ? await writeSnapshot(snapshot, accountId) : false;
   if (storeConfigured()) { await markKeyStatus(accountId, 'ok'); await noteRefresh(accountId, true); }
-  logEvent('refresh.ok', { accountId, ms: Date.now() - started, warnings: snapshot.warnings?.length || 0, persisted });
-  return { snapshot, persisted };
+  logEvent('refresh.ok', { accountId, ms: Date.now() - started, warnings: snapshot.warnings?.length || 0, persisted, bytes: size.total, storedBytes: size.storedBytes, largest: size.parts.slice(0, 3) });
+  return { snapshot, persisted, size };
 }
 
 /**
@@ -101,8 +103,8 @@ export default async function handler(req, res) {
       const left = CRON_BUDGET_MS - (Date.now() - started);
       if (left < CRON_MIN_ACCOUNT_MS) { done.push({ id: a.id, skipped: 'time budget' }); continue; }
       try {
-        const { persisted } = await refreshAccount(a.id, steps, cronAccountBudgetMs(left));
-        done.push({ id: a.id, ok: true, persisted });
+        const { persisted, size } = await refreshAccount(a.id, steps, cronAccountBudgetMs(left));
+        done.push({ id: a.id, ok: true, persisted, bytes: size.total });
       } catch (err) { done.push({ id: a.id, ok: false, error: err.message }); }
     }
     return res.status(200).json({ ok: true, cron: true, ms: Date.now() - started, budgetMs: CRON_BUDGET_MS, elapsedMs: Date.now() - started, accounts: done, synced, steps });
@@ -114,7 +116,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { snapshot, persisted } = await refreshAccount(accountId, steps, REFRESH_BUDGET_MS);
+    const { snapshot, persisted, size } = await refreshAccount(accountId, steps, REFRESH_BUDGET_MS);
 
     res.status(200).json({
       ok: true,
@@ -135,6 +137,8 @@ export default async function handler(req, res) {
       steps,
       generatedAt: snapshot.generatedAt,
       templateVersion: snapshot.templateVersion,
+      // Bytes per part of the stored snapshot (no data), for Copy diagnostics.
+      size,
       settings: snapshot.settings,
       counts: {
         adAccounts: snapshot.adAccounts.length,

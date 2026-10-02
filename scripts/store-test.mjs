@@ -208,5 +208,65 @@ console.log('\nOversized snapshots are trimmed before storing');
 }
 
 
+console.log('\nSnapshot size breakdown');
+{
+  const { snapshotSizeBreakdown } = await import('../api/_snapshot.js');
+  const rows = Array.from({ length: 50 }, (_, i) => ({ id: `a${i}`, cost: 1, ltv30Days: null, cvr: null, ctr: null, reported: null }));
+  const snap = { schema: 2, ranges: { '30d': { label: '30 days', levels: { adset: rows, ad: [{ id: 'x', cost: 2 }] } } }, crm: { leads: [{ id: 'l1', pad: 'x'.repeat(500) }], sales: [], calls: [], subscriptions: [], window: {} }, warnings: [] };
+  const b = snapshotSizeBreakdown?.(snap);
+  check('total is the stored JSON size', b?.total, Buffer.byteLength(JSON.stringify(snap)));
+  check('parts name each range level and each CRM list', Boolean(b) && b.parts.some((p) => p.key === 'ranges.30d.adset') && b.parts.some((p) => p.key === 'crm.leads'), true);
+  check('parts are sorted largest first', Boolean(b) && b.parts.every((p, i) => !i || b.parts[i - 1].bytes >= p.bytes), true);
+  check('nullBytes is what null report fields cost', Boolean(b) && b.nullBytes > 0 && b.nullBytes === b.total - Buffer.byteLength(JSON.stringify({ ...snap, ranges: { '30d': { label: '30 days', levels: { adset: rows.map(({ id, cost }) => ({ id, cost })), ad: [{ id: 'x', cost: 2 }] } } } })), true);
+}
+
+/* The snapshot is stored gzip-compressed so a large account fits Upstash's 10 MB request limit
+ * without trimming its CRM; snapshots stored as plain JSON by older versions still read. */
+console.log('\nSnapshots are stored compressed');
+{
+  const mem = new Map();
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (!String(url).startsWith('http://kv.gz')) return orig(url, opts);
+    const [cmd, k, v] = JSON.parse(opts.body);
+    if (cmd === 'GET') return new Response(JSON.stringify({ result: mem.get(k) ?? null }));
+    if (cmd === 'SET') { mem.set(k, v); return new Response(JSON.stringify({ result: 'OK' })); }
+    return new Response(JSON.stringify({ result: null }));
+  };
+  delete process.env.VERCEL_ENV;
+  await withEnv({ KV_REST_API_URL: 'http://kv.gz', KV_REST_API_TOKEN: 't' }, async (m) => {
+    const rows = Array.from({ length: 4000 }, (_, i) => ({ id: `ad-${i}`, name: `Ad Set ${i % 40} - Broad - US - FE Webinar - Leads`, cost: i % 97, revenue: (i * 7) % 300, sales: i % 3, clicks: i % 50 }));
+    const snap = { schema: 2, generatedAt: '2026-10-02T09:00:00.000Z', ranges: { '30d': { levels: { ad: rows } } }, crm: { leads: [], sales: [], calls: [], subscriptions: [] } };
+    const plain = Buffer.byteLength(JSON.stringify(snap));
+    check('writeSnapshot stores it', await m.writeSnapshot(snap, 'z'), true);
+    const stored = mem.get('aihyros:acct:z:snapshot');
+    check('the stored value is compressed (gz1: prefix)', String(stored).startsWith('gz1:'), true);
+    check('…and several times smaller than the JSON', Buffer.byteLength(stored) * 4 < plain, true);
+    check('storedSnapshotBytes measures the stored value', m.storedSnapshotBytes?.(snap), Buffer.byteLength(stored));
+    const back = await m.readSnapshot('z');
+    check('readSnapshot returns the same snapshot', JSON.stringify(back), JSON.stringify(snap));
+    check('the dated history copy is compressed too', [...mem.entries()].some(([k, v]) => k === 'aihyros:acct:z:snapshot:2026-10-02' && String(v).startsWith('gz1:')), true);
+    mem.set('aihyros:acct:old:snapshot', JSON.stringify({ generatedAt: '2026-09-01T00:00:00.000Z', origin: 'mcp' }));
+    check('a plain-JSON snapshot from an older version still reads', (await m.readSnapshot('old'))?.origin, 'mcp');
+    mem.set('aihyros:acct:bad:snapshot', 'gz1:not-base64-gzip');
+    check('a corrupt stored value reads as null, never throws', await m.readSnapshot('bad'), null);
+  });
+  globalThis.fetch = orig;
+}
+
+console.log('\nThe size cap is measured on the stored (compressed) bytes');
+{
+  const { fitSnapshot } = await import('../api/_snapshot.js');
+  const { storedSnapshotBytes } = await import('../api/_store.js');
+  const leads = Array.from({ length: 3000 }, (_, i) => ({ id: `l${i}`, joined: '2026-09-20', stage: 'Lead', income: 0, hasAttribution: true, note: 'same text on every lead '.repeat(4) }));
+  const snap = { generatedAt: 'x', warnings: [], crm: { leads, sales: [], calls: [], subscriptions: [], sync: { truncated: {} }, totals: {} } };
+  const jsonBytes = Buffer.byteLength(JSON.stringify(snap));
+  const limit = Math.floor(jsonBytes / 2);
+  const kept = fitSnapshot(snap, limit, storedSnapshotBytes);
+  check('over the limit as JSON but under it compressed: nothing is trimmed', kept.crm.leads.length === 3000 && !kept.warnings.length, true);
+  const trimmed = fitSnapshot(snap, limit);
+  check('a trim marks crm.sync.sizeTrimmed so the next build re-pulls the CRM', trimmed.crm.sync.sizeTrimmed === true && trimmed.crm.leads.length < 3000, true);
+}
+
 console.log(fails ? `\n${fails} FAILURE(S)\n` : '\nAll store + API contract checks pass.\n');
 process.exit(fails ? 1 : 0);

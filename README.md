@@ -16,7 +16,7 @@ The UI is the HYROS product-window system (cream ground, white windows, mono
 labels, serif figures, one purple accent; Sep 2026).
 **Before ANY visual change, read [`UI-STYLE-GUIDE.md`](./UI-STYLE-GUIDE.md).**
 
-This is template version **0.2.5** (`package.json`; also returned by
+This is template version **0.2.6** (`package.json`; also returned by
 `/api/health` and stored in every snapshot as `templateVersion`). Changes
 are listed in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -124,7 +124,7 @@ styles and a portable `SPEC.md`. The core app discovers them from
 ## What it does
 
 **Performance Report** — five levels (Traffic source · Account · Campaign ·
-Ad Set · Ad), 103 selectable metrics, date-range chips, client-side
+Ad Set · Ad), 93 selectable metrics (the 10 LTV fields are switched off while HYROS returns 0 for them, HMCP-359), date-range chips, client-side
 sort/filter/search, sticky totals, CSV export, click-through from any number
 to the lead cohort behind it and on to each lead's journey.
 
@@ -201,9 +201,10 @@ averaged.
   inside the CRM's share of the refresh budget. `crm.sync.truncated.<list>`
   is set only when the API still had more rows at the cap, a pagination
   cursor expired, or the deadline cut the pull; the CRM then shows the
-  count with a **"+"** and keeps the newest rows. Leads sync incrementally
-  when the previous snapshot's window overlaps the new one; sales, calls
-  and subscriptions are full pulls. Sources page to 10,000 as well.
+  count with a **"+"** and keeps the newest rows. Leads, sales and calls
+  sync incrementally (`updatedFromDate`) when the previous snapshot's
+  window overlaps the new one and is under 7 days old; subscriptions are
+  full pulls. Sources page to 10,000 as well.
 - **Sources and attribution rows** are paginated within the refresh
   budget; when the budget runs out the snapshot carries
   `sourcesTruncated` or `ranges[key].skipped` and the header shows a
@@ -226,9 +227,11 @@ averaged.
   (`"api/refresh.js": { "maxDuration": 60, … }`) and `REFRESH_MAX_S` to
   60; every share scales down with it.
 - **Snapshot size.** Upstash refuses requests over 10 MB and the snapshot
-  is written in one request, so a snapshot that would exceed 9 MB is
-  trimmed to its newest CRM rows before it is stored; the trimmed lists
-  are flagged `truncated` and a warning says what was kept.
+  is written in one request, so it is stored gzip-compressed (about 5×
+  smaller). Only if the compressed snapshot would still exceed 9 MB is it
+  trimmed to its newest CRM rows; the trimmed lists are flagged
+  `truncated`, a warning says what was kept, and the next refresh pulls the
+  CRM in full instead of building on the trimmed list.
 - **Scale Advisor** covers every ad account plus the six biggest ad sets by
   30-day spend; **Tracking Health** checks the script on up to 5 verified
   domains and lists 50 tracking-parameter rows per integration type.
@@ -260,8 +263,10 @@ merge:
 ## Diagnostics & support
 
 - **Copy diagnostics** (Setup & security) copies a JSON report: template
-  version, setup state, storage variables in use, the last refresh's steps
-  and warnings, and `missingTools` from `/api/health`. It contains no keys,
+  version, setup state, storage variables in use, the last refresh's steps,
+  warnings and snapshot size breakdown (bytes per range level and CRM list,
+  and how much null report fields cost), and `missingTools` from
+  `/api/health`. It contains no keys,
   passwords or lead data — paste it into a support request.
 - **Vercel runtime logs** (project → Logs) contain one JSON line per
   refresh, setup or MCP failure (`{"evt": …, "code": …, "tool": …}`),

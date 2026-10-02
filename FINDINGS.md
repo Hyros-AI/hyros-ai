@@ -299,7 +299,7 @@ a documentation ask.
 | P0 | Confirm in writing and document `API-Key` auth on `/mcp`, or provide a non-interactive OAuth / service-token path | Template-wide outage risk; users reading the docs are told no key exists | flagged |
 | P0 | Why does `hyros_get_marginal_cac_curve` return HTTP 404? Is it deployed? | Scale Advisor shows an error card | **answering since late Sep** (beta report 2026-09-30) |
 | P0 | Structured error codes: MCP not enabled for the account / invalid key / client not authorized | Raw text on the setup screen | new |
-| P1 | `updatedFromDate` / `updatedToDate` on sales, calls and subscriptions | Full re-pull every refresh; CRM cap | **in QA** |
+| P1 | `updatedFromDate` / `updatedToDate` on sales, calls and subscriptions | Full re-pull every refresh; CRM cap | **shipped for sales and calls** (used since 0.2.6); subscriptions still full |
 | P1 | Total counts (or counts by stage / tag / day) on paged lists | "1,000+" instead of a real total | **in QA** (group-by counts) |
 | P1 | Synchronous `sort` + `limit` on `/attribution` with `isAdAccountId` | Top-N computed from the newest 250 sources | **investigating** |
 | P1 | Document `parentId` on ad rows, the `{ request }` wrapper and enum casing, the two Tracking Health tools, `ceilingBasis`, the `windowAttributionDaysRange` model rule | Code relies on undocumented behaviour | new (docs) |
@@ -311,6 +311,7 @@ a documentation ask.
 | P2 | Source, category and link names stored with a letter substitution (`dbbduvat` for `coaching`, `fzbvy-cebbedbfg` for `email-broadcast`: a–e shifted +1, g–z +13), seen in the HYROS app itself — which creation path could store names encoded? | Garbled names in every source-based tab | new (question, cause unconfirmed) |
 | P2 | Honour the `fields` projection on `/attribution` (payloads are ~90% null, ~120 fields per row) or document that it does not trim | Payload size; unverified on the bound account | open |
 | P2 | Explicit error (or `SOURCE_CATEGORY` semantics) for `facebook_campaign` instead of `[]` | Silent empty array reads as missing data | open |
+| P1 | LTV fields (`LTV_*`, `LTV_*_FORECAST`) return 0 on every row of the attribution and public reports (HMCP-359) | The template switches the 10 LTV columns off until fixed | new |
 | P2 | `income` / LTV fields on the Lead object | CRM Income needs a capped sales join | open |
 | P2 | Bulk conversion paths: sync or paged `JOURNEY` beyond 30 per call, or a `touched` aggregate (`attributionMode: CREDIT | TOUCHED`) | Funnel & Journey and Ad LTV tabs are demo-only | **in QA** |
 | P2 | Document tools the connector exposes but the docs omit: webhook subscription tools, `hyros_get_clicks`, `hyros_get_ads` / `hyros_get_keywords` request shapes | Assistants cannot use them safely | new (docs) |

@@ -4,6 +4,8 @@
  * Every function fails soft: a KV outage degrades to the seed, never a 500.
  */
 
+import { gzipSync, gunzipSync } from 'node:zlib';
+
 const KEY = 'aihyros:snapshot:latest';
 const HISTORY_PREFIX = 'aihyros:snapshot:';
 const TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
@@ -162,12 +164,34 @@ export async function writePrefs(prefs, accountId = PRIMARY_ID) {
   return ok.every((r) => r !== null);
 }
 
+/*
+ * Snapshots are stored gzip-compressed (base64 behind a `gz1:` marker): report
+ * rows are repetitive, so a large account fits Upstash's 10 MB request limit
+ * without trimming. Plain JSON written by older versions still reads.
+ */
+const GZ = 'gz1:';
+const encodeSnapshot = (snapshot) => GZ + gzipSync(JSON.stringify(snapshot)).toString('base64');
+
+function decodeSnapshot(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    return JSON.parse(raw.startsWith(GZ) ? gunzipSync(Buffer.from(raw.slice(GZ.length), 'base64')).toString('utf8') : raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Bytes the snapshot takes in the store (what the 10 MB request limit sees). */
+export function storedSnapshotBytes(snapshot) {
+  return Buffer.byteLength(encodeSnapshot(snapshot));
+}
+
 export async function readSnapshot(accountId = PRIMARY_ID) {
-  return readJson(snapKey(accountId));
+  return decodeSnapshot(await kv(['GET', snapKey(accountId)]));
 }
 
 export async function writeSnapshot(snapshot, accountId = PRIMARY_ID) {
-  const payload = JSON.stringify(snapshot);
+  const payload = encodeSnapshot(snapshot);
   const day = (snapshot.generatedAt || new Date().toISOString()).slice(0, 10);
   const ok = await kv(['SET', snapKey(accountId), payload]);
   // Keep a dated copy so a bad refresh can be compared against yesterday.
