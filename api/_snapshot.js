@@ -32,6 +32,25 @@ export const DEFAULT_BUDGET_MS = REFRESH_BUDGET_MS;
 // which makes column-adding instant client-side instead of per-refresh.
 const REPORT_FIELDS = ['NAME', 'PARENT_NAME', ...CATALOG.filter((c) => !c.off).map((c) => c.f)];
 
+/**
+ * Since 2026-10-20 (HMCP-359) the attribution report rejects the WHOLE request
+ * when it asks for fields the account is not entitled to (the LTV fields
+ * without LTV forecasting) and the error asks to "remove them from fields".
+ * refusedFields() reads that error: it returns the requested fields the
+ * message names (as the API code, LTV_30_DAYS, or as the row key,
+ * ltv30Days), or every requested LTV field when it names none. Any other
+ * error returns [] and is handled as before.
+ */
+const REFUSED_FIELDS_TEXT = /remove\b[^.\n]{0,40}\bfrom\b[^.\n]{0,15}\bfields?\b/i;
+const KEY_BY_FIELD = new Map(CATALOG.map((c) => [c.f, c.k]));
+export function refusedFields(message, requested = REPORT_FIELDS) {
+  const text = String(message || '');
+  if (!REFUSED_FIELDS_TEXT.test(text)) return [];
+  const word = (w) => new RegExp(`(^|[^A-Za-z0-9_])${w}([^A-Za-z0-9_]|$)`).test(text);
+  const named = requested.filter((f) => word(f) || (KEY_BY_FIELD.has(f) && word(KEY_BY_FIELD.get(f))));
+  return named.length ? named : requested.filter((f) => /^LTV_/.test(f));
+}
+
 /* ---------------- date helpers (account timezone) ---------------- */
 
 /** Ranges are YYYY-MM-DD in the account timezone ("-05:00", "UTC", "America/New_York", … — see _dates.js). */
@@ -149,7 +168,7 @@ const CRM_MAX_PAGES = 40;
  * caller can record "showing newest N rows" instead of presenting a partial
  * table as complete.
  */
-async function fetchLevel(level, adAccountId, range, settings, { deadline = null, timeoutMs, tz = 'UTC', now = new Date() } = {}) {
+async function fetchLevel(level, adAccountId, range, settings, { deadline = null, timeoutMs, tz = 'UTC', now = new Date(), fields = REPORT_FIELDS } = {}) {
   const request = {
     attributionModel: settings.model,
     startDate: dayStart(range.start, tz),
@@ -167,7 +186,7 @@ async function fetchLevel(level, adAccountId, range, settings, { deadline = null
     // reportSourceVisibility (only the ad-account report does), so deleted
     // source links still count here — FINDINGS.md §15.
     sourceConfiguration: 'ALL_SOURCES',
-    fields: REPORT_FIELDS,
+    fields,
   };
   // Per-query attribution window (LAST_CLICK only, per the API).
   if (settings.windowDays > 0 && settings.model === 'LAST_CLICK') {
@@ -596,6 +615,11 @@ export async function buildSnapshot({
   // kind ∈ 'unsupported' | 'rate_limited' | 'error' | 'truncated' | 'time budget'.
   const warnings = [];
   const failed = new Set();
+  // Fields the report refused for this account (see refusedFields): dropped
+  // for the rest of the build, so the refusal costs one extra call, not one
+  // per level and range.
+  const refused = new Set();
+  const requestFields = () => REPORT_FIELDS.filter((f) => !refused.has(f));
   const warn =(acct, level, error, kind = 'error') => {
     warnings.push({ adAccountId: acct ? String(acct.id) : null, name: acct?.name || null, type: acct?.type || null, level, error: String(error), kind });
     onProgress(`skip ${acct?.name || acct?.id || 'core'}: ${error}`);
@@ -635,8 +659,21 @@ export async function buildSnapshot({
     const id = String(acct.id);
     const key = `${id}:${level}`;
     if (failed.has(key)) return [];
+    const attempt = () => fetchLevel(level, id, range, settings, { deadline: coreDeadline, timeoutMs: callTimeout(), tz, now, fields: requestFields() });
     try {
-      const { rows, truncated, error } = await fetchLevel(level, id, range, settings, { deadline: coreDeadline, timeoutMs: callTimeout(), tz, now });
+      let page;
+      try {
+        page = await attempt();
+      } catch (err) {
+        const drop = refusedFields(err?.message, requestFields());
+        if (!drop.length) throw err;
+        // The account is not entitled to these fields: leave their columns
+        // empty, say so once, and retry this level without them.
+        drop.forEach((f) => refused.add(f));
+        warn(null, 'fields', `not available on this account, left empty: ${drop.join(', ')} (${err.message})`, 'unsupported');
+        page = await attempt();
+      }
+      const { rows, truncated, error } = page;
       if (truncated) warn(acct, level, `showing newest ${rows.length} rows${error ? ` (${error})` : ''}`, 'truncated');
       return rows;
     } catch (err) {
@@ -719,6 +756,8 @@ export async function buildSnapshot({
 
   return {
     schema: 2,
+    // Report fields the account refused this build (empty columns), e.g. LTV without forecasting.
+    fieldsRefused: [...refused],
     templateVersion: TEMPLATE_VERSION,
     generatedAt: new Date().toISOString(),
     origin: 'mcp',

@@ -4,6 +4,26 @@ All notable changes to the AI HYROS dashboard template are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] — 2026-10-20
+
+### Fixed
+- **A field the account is not entitled to no longer empties the report.**
+  Since 2026-10-20 (HMCP-359) the attribution report rejects the whole
+  request when it asks for LTV fields on an account without LTV
+  forecasting, and the error asks to remove them from `fields`. A fork
+  that switched the LTV columns back on lost every ad set and ad table.
+  The refresh now reads that error, drops exactly the fields it names (all
+  requested LTV fields when it names none), retries once and leaves them
+  out for the rest of the build. Their columns stay empty, one
+  `unsupported` warning names them, and `snapshot.fieldsRefused` lists
+  them. Any other error is handled as before.
+
+### Changed
+- The LTV columns stay switched off by default; the catalog note now says
+  why (they need LTV forecasting on the HYROS account) instead of "HYROS
+  returns 0". Removing `off` in `public/shared/metrics.js` is safe on any
+  account.
+
 ## [0.2.6] — 2026-10-02
 
 ### Changed

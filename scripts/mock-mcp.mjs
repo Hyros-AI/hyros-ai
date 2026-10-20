@@ -38,6 +38,8 @@ const journeyEmails = (request, flat) => {
  *   mock.latencyMs = 4000         delay every tool call (number) or per tool ({ tool: ms })
  *   mock.adAccounts = []          replace the ad-account list
  *   mock.timezone = 'America/New_York'   userProfile.timezone
+ *   mock.refuseFields = ['LTV_30_DAYS']   the attribution report rejects any
+ *       request that asks for one of these (like LTV without forecasting)
  *   mock.now = Date.parse('2026-09-14T12:00:00Z')   the mock's clock for the
  *       report's "cannot be in the future" check (null = the real clock);
  *       kept across reset() so a test sets it once next to its build `now`
@@ -50,12 +52,14 @@ export const mock = {
   adAccounts: null,
   timezone: null,
   now: null,
+  refuseFields: [],
   failNext(spec) { this.failures.push({ times: 1, ...spec }); },
   pages(tool, n, size = 250) { this.paged[tool] = { n, size }; },
   expireCursorOn(tool) { this.expiredCursors.add(tool); },
   reset() {
     this.failures = []; this.paged = {}; this.expiredCursors = new Set();
     this.latencyMs = 0; this.adAccounts = null; this.timezone = null;
+    this.refuseFields = [];
   },
 };
 
@@ -149,6 +153,12 @@ const TOOLS = {
     for (const bound of [request.startDate, request.endDate]) {
       const t = Date.parse(/[+-]\d\d:\d\d$|Z$/.test(bound || '') ? bound : `${bound}Z`);
       if (Number.isFinite(t) && t > clock) throw new ToolError('hyros_get_attribution_report: startDate or endDate cannot be in the future.');
+    }
+    // Since 2026-10-20 the live report refuses the whole request for fields the
+    // account is not entitled to (LTV without forecasting, HMCP-359).
+    const refused = (request.fields || []).filter((f) => mock.refuseFields.includes(f));
+    if (refused.length) {
+      throw new ToolError(`hyros_get_attribution_report: The fields ${refused.join(', ')} require LTV forecasting, which is not enabled for this account. Remove them from fields.`);
     }
     const acct = adAccounts().find((a) => a.id === String(request.ids[0]));
     if (!acct) return { result: [], nextPageId: null };

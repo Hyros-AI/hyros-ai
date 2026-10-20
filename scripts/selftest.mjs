@@ -174,6 +174,18 @@ console.log('\nTimezones the API may send (userProfile.timezone is a free string
   check('dayEnd of a day after today (clock skew) also clamps to now', dayEnd('2026-09-15', '-05:00', noon), '2026-09-14T07:00:00-05:00');
 }
 
+console.log('\nRefused report fields (HMCP-359: the report rejects fields the account is not entitled to)');
+{
+  const { refusedFields } = await import('../api/_snapshot.js');
+  const req = ['NAME', 'COST', 'LTV_30_DAYS', 'LTV_90_DAYS', 'LTV_90_DAYS_FORECAST'];
+  check('names the API codes in the message', JSON.stringify(refusedFields('LTV_30_DAYS and LTV_90_DAYS_FORECAST need forecasting. Remove them from fields.', req)), '["LTV_30_DAYS","LTV_90_DAYS_FORECAST"]');
+  check('names the row keys in the message', JSON.stringify(refusedFields('ltv90Days is not allowed for this account, remove it from the fields list', req)), '["LTV_90_DAYS"]');
+  check('names nothing: every requested LTV field', JSON.stringify(refusedFields('Forecasting is not enabled. Remove them from fields.', req)), '["LTV_30_DAYS","LTV_90_DAYS","LTV_90_DAYS_FORECAST"]');
+  check('LTV_30_DAYS does not match inside LTV_30_DAYS_FORECAST', JSON.stringify(refusedFields('LTV_30_DAYS_FORECAST: remove them from fields', ['LTV_30_DAYS', 'LTV_30_DAYS_FORECAST'])), '["LTV_30_DAYS_FORECAST"]');
+  check('any other error is not a refusal', JSON.stringify(refusedFields('Unsupported level type facebook_ad', req)), '[]');
+  check('a refusal of fields that were not requested drops nothing', JSON.stringify(refusedFields('LTV_30_DAYS: remove them from fields', ['NAME', 'COST'])), '[]');
+}
+
 console.log('\nLegacy dates (docs: sales/calls/subscriptions use EEE MMM dd HH:mm:ss zzz yyyy)');
 {
   const { parseHyrosDate } = await import('../api/_dates.js');

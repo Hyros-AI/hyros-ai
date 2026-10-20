@@ -28,7 +28,11 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
  *       from additive parts) · null non-aggregatable (native rows only —
  *       rolled-up Campaign/Traffic/Account rows show "—")
  */
-const OFF_LTV = 'HYROS returns 0 for every LTV field today (HMCP-359), so the column is switched off until it is fixed.';
+// HMCP-359 (fixed 2026-10-16): LTV fields are filled only on accounts with LTV
+// forecasting; without it the report refuses them, and the refresh drops the
+// refused fields and retries (api/_snapshot.js refusedFields). Remove `off` to
+// request them; accounts without forecasting get empty columns and a warning.
+const OFF_LTV = 'LTV needs LTV forecasting on the HYROS account (HMCP-359), so the column is switched off by default.';
 
 export const CATALOG = [
   // Core

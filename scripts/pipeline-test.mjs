@@ -147,6 +147,21 @@ try {
   check('rate-limited account is retried on the next range, not blacklisted', levelsFor('9001').length === 10 && snapRl.ranges['30d'].levels.account.some((r) => r.id === '9001'), String(levelsFor('9001').length));
   mock.reset();
 
+  console.log('\nFields the account is not entitled to are dropped once and the report still loads (HMCP-359, 2026-10-20)');
+  calls.length = 0;
+  mock.refuseFields = ['TOTAL_REVENUE'];
+  const snapRef = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs });
+  const attrCalls = calls.filter((c) => c.name === 'hyros_get_attribution_report').map((c) => c.args.request.fields || []);
+  const refWarn = snapRef.warnings.filter((w) => w.level === 'fields');
+  check('a refused field does not empty the report: the Meta ad sets still load', snapRef.ranges['30d'].levels.adset.length > 0 && snapRef.ranges.today.levels.adset.length > 0, String(snapRef.ranges['30d'].levels.adset.length));
+  check('one unsupported warning names the refused field and keeps the server text', refWarn.length === 1 && refWarn[0].kind === 'unsupported' && /TOTAL_REVENUE/.test(refWarn[0].error) && /Remove them from fields/.test(refWarn[0].error), JSON.stringify(refWarn));
+  check('the refusal costs one call: every later request leaves the field out', attrCalls.filter((f) => f.includes('TOTAL_REVENUE')).length === 1 && attrCalls.length > 10, JSON.stringify(attrCalls.map((f) => f.includes('TOTAL_REVENUE'))));
+  check('the snapshot lists the refused fields; other fields are still requested', JSON.stringify(snapRef.fieldsRefused) === '["TOTAL_REVENUE"]' && attrCalls.at(-1).includes('COST'), JSON.stringify(snapRef.fieldsRefused));
+  mock.reset();
+  calls.length = 0;
+  const snapNoRef = await buildSnapshot({ now: new Date('2026-09-14T12:00:00Z'), prefs });
+  check('without a refusal nothing is dropped', snapNoRef.fieldsRefused.length === 0 && !snapNoRef.warnings.some((w) => w.level === 'fields'), JSON.stringify(snapNoRef.fieldsRefused));
+
   console.log('\nAttribution rows are paginated (docs: pageSize 1-250, nextPageId)');
   mock.adAccounts = [{ id: '9001', name: 'Mock Meta', type: 'FACEBOOK' }];
   mock.pages('hyros_get_attribution_report', 3, 250);

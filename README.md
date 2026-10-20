@@ -16,7 +16,7 @@ The UI is the HYROS product-window system (cream ground, white windows, mono
 labels, serif figures, one purple accent; Sep 2026).
 **Before ANY visual change, read [`UI-STYLE-GUIDE.md`](./UI-STYLE-GUIDE.md).**
 
-This is template version **0.2.6** (`package.json`; also returned by
+This is template version **0.2.7** (`package.json`; also returned by
 `/api/health` and stored in every snapshot as `templateVersion`). Changes
 are listed in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -124,7 +124,7 @@ styles and a portable `SPEC.md`. The core app discovers them from
 ## What it does
 
 **Performance Report** — five levels (Traffic source · Account · Campaign ·
-Ad Set · Ad), 93 selectable metrics (the 10 LTV fields are switched off while HYROS returns 0 for them, HMCP-359), date-range chips, client-side
+Ad Set · Ad), 93 selectable metrics (the 10 LTV fields are switched off by default: HYROS fills them only on accounts with LTV forecasting, HMCP-359), date-range chips, client-side
 sort/filter/search, sticky totals, CSV export, click-through from any number
 to the lead cohort behind it and on to each lead's journey.
 
